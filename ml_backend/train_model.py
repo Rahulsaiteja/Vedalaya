@@ -1,6 +1,11 @@
 import os
 import cv2
 import numpy as np
+
+# Force TensorFlow to use legacy Keras 2
+import os
+os.environ['TF_USE_LEGACY_KERAS'] = '1'
+
 import tensorflow as tf
 from tensorflow.keras import layers, models, callbacks
 from tensorflow.keras.applications import MobileNetV2

@@ -8,6 +8,8 @@ import threading
 import subprocess
 import requests
 
+# Force TensorFlow to use legacy Keras 2 (required for loading older models with renorm)
+os.environ['TF_USE_LEGACY_KERAS'] = '1'
 # We import tensorflow and keras to load the custom model
 import tensorflow as tf
 
