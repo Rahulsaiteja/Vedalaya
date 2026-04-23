@@ -10,8 +10,16 @@ import requests
 
 # Force TensorFlow to use legacy Keras 2 (required for loading older models with renorm)
 os.environ['TF_USE_LEGACY_KERAS'] = '1'
+# Prevent GPU memory allocation and minimize TF logs
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 # We import tensorflow and keras to load the custom model
 import tensorflow as tf
+
+# Limit threads to save memory on Render Free tier
+tf.config.threading.set_inter_op_parallelism_threads(1)
+tf.config.threading.set_intra_op_parallelism_threads(1)
 
 app = Flask(__name__)
 # Enable CORS so the React frontend or Node backend can call this API
@@ -34,10 +42,13 @@ def load_custom_model():
     global custom_model, class_names
     if os.path.exists(MODEL_PATH) and os.path.exists(CLASS_NAMES_PATH):
         print("Loading custom trained model...")
-        custom_model = tf.keras.models.load_model(MODEL_PATH)
-        with open(CLASS_NAMES_PATH, "r") as f:
-            class_names = json.load(f)
-        print(f"Model loaded with classes: {class_names}")
+        try:
+            custom_model = tf.keras.models.load_model(MODEL_PATH)
+            with open(CLASS_NAMES_PATH, "r") as f:
+                class_names = json.load(f)
+            print(f"Model loaded with classes: {class_names}")
+        except Exception as e:
+            print(f"\nCRITICAL ERROR LOADING MODEL: {e}\n")
     else:
         print("Custom model not found. Please run train_model.py first.")
 
