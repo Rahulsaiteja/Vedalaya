@@ -1,0 +1,302 @@
+import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import mongoose from 'mongoose';
+import { z } from 'zod';
+
+import { requireAuth, requireRole } from '../middleware/auth.js';
+import { uploadLecture } from '../middleware/upload.js';
+import { Lecture } from '../models/Lecture.js';
+import { env } from '../utils/env.js';
+import { v2 as cloudinary } from 'cloudinary';
+
+const router = express.Router();
+
+function getYoutubeVideoId(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes('youtu.be')) {
+      return u.pathname.slice(1) || null;
+    }
+    if (u.hostname.includes('youtube.com')) {
+      const v = u.searchParams.get('v');
+      if (v) return v;
+      const parts = u.pathname.split('/').filter(Boolean);
+      const embedIdx = parts.findIndex((p) => p === 'embed');
+      if (embedIdx >= 0 && parts[embedIdx + 1]) return parts[embedIdx + 1];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function inferFileMediaType(mimeType) {
+  const mt = (mimeType || '').toLowerCase();
+  if (mt.startsWith('video/')) return 'video';
+  if (mt.startsWith('audio/')) return 'audio';
+  return 'document';
+}
+
+router.get('/', requireAuth, async (req, res) => {
+  const isTeacher = req.user.role === 'teacher';
+  const query = isTeacher ? { createdBy: req.user.sub } : { status: 'published' };
+  const lectures = await Lecture.find(query)
+    .sort({ updatedAt: -1 })
+    .select('title description category status createdBy sourceType mediaType youtubeUrl youtubeVideoId file variants processingStatus updatedAt')
+    .lean();
+  const normalized = lectures.map((l) => ({
+    ...l,
+    mediaType: l.mediaType || (l.sourceType === 'youtube' ? 'video' : inferFileMediaType(l.file?.mimeType)),
+  }));
+  res.json({ lectures: normalized });
+});
+
+router.post(
+  '/',
+  requireAuth,
+  requireRole('teacher'),
+  uploadLecture.single('file'),
+  async (req, res) => {
+    const bodySchema = z.object({
+      title: z.string().min(1),
+      description: z.string().optional().default(''),
+      category: z.string().optional().default('General'),
+      youtubeUrl: z.string().optional().default(''),
+    });
+
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: { message: parsed.error.message } });
+    const youtubeUrl = parsed.data.youtubeUrl?.trim() || '';
+    const youtubeVideoId = youtubeUrl ? getYoutubeVideoId(youtubeUrl) : null;
+    const isYoutube = Boolean(youtubeVideoId);
+    if (!isYoutube && !req.file) {
+      return res.status(400).json({ error: { message: 'Provide either a file or a valid YouTube URL' } });
+    }
+
+    let cloudinaryUrl = '';
+    let cloudinaryPublicId = '';
+
+    if (!isYoutube && req.file) {
+      const absolutePath = path.resolve(process.cwd(), env.UPLOAD_DIR, req.file.filename);
+      try {
+        const result = await new Promise((resolve, reject) => {
+          cloudinary.uploader.upload_large(absolutePath, {
+            resource_type: 'auto',
+            folder: 'vedalaya_lectures',
+            chunk_size: 6000000 // 6MB chunks to bypass 100MB limit safely
+          }, (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          });
+        });
+        cloudinaryUrl = result.secure_url;
+        cloudinaryPublicId = result.public_id;
+      } catch (err) {
+        console.error('Cloudinary upload error:', err);
+        return res.status(500).json({ error: { message: 'Cloudinary upload failed: ' + (err.message || 'Unknown error') } });
+      } finally {
+        if (fs.existsSync(absolutePath)) {
+          fs.unlinkSync(absolutePath);
+        }
+      }
+    }
+
+    const lecture = await Lecture.create({
+      title: parsed.data.title,
+      description: parsed.data.description,
+      category: parsed.data.category,
+      createdBy: req.user.sub,
+      status: 'draft',
+      sourceType: isYoutube ? 'youtube' : 'file',
+      mediaType: isYoutube ? 'video' : inferFileMediaType(req.file?.mimetype || ''),
+      youtubeUrl: isYoutube ? youtubeUrl : '',
+      youtubeVideoId: isYoutube ? youtubeVideoId : '',
+      file: {
+        storedName: req.file?.filename || '',
+        originalName: req.file?.originalname || '',
+        mimeType: req.file?.mimetype || '',
+        size: req.file?.size || 0,
+        cloudinaryUrl: cloudinaryUrl,
+        cloudinaryPublicId: cloudinaryPublicId,
+      },
+      variants: isYoutube ? [] : [
+        {
+          quality: 'original',
+          storedName: req.file?.filename || '',
+          mimeType: req.file?.mimetype || '',
+          size: req.file?.size || 0,
+          cloudinaryUrl: cloudinaryUrl,
+          cloudinaryPublicId: cloudinaryPublicId,
+        },
+        {
+          quality: '720p',
+          storedName: req.file?.filename || '',
+          mimeType: req.file?.mimetype || '',
+          size: req.file?.size || 0,
+          cloudinaryUrl: cloudinaryUrl,
+          cloudinaryPublicId: cloudinaryPublicId,
+        },
+        {
+          quality: '480p',
+          storedName: req.file?.filename || '',
+          mimeType: req.file?.mimetype || '',
+          size: req.file?.size || 0,
+          cloudinaryUrl: cloudinaryUrl,
+          cloudinaryPublicId: cloudinaryPublicId,
+        },
+        {
+          quality: '360p',
+          storedName: req.file?.filename || '',
+          mimeType: req.file?.mimetype || '',
+          size: req.file?.size || 0,
+          cloudinaryUrl: cloudinaryUrl,
+          cloudinaryPublicId: cloudinaryPublicId,
+        }
+      ],
+      processingStatus: 'completed' // Cloudinary handles transcoding automatically
+    });
+
+    res.status(201).json({ lecture });
+  },
+);
+
+router.post('/:id/publish', requireAuth, requireRole('teacher'), async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: { message: 'Invalid id' } });
+  const lecture = await Lecture.findById(req.params.id);
+  if (!lecture) return res.status(404).json({ error: { message: 'Lecture not found' } });
+  if (lecture.createdBy.toString() !== req.user.sub) return res.status(403).json({ error: { message: 'Forbidden' } });
+  lecture.status = 'published';
+  await lecture.save();
+  res.json({ lecture });
+});
+
+router.post('/:id/unpublish', requireAuth, requireRole('teacher'), async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: { message: 'Invalid id' } });
+  const lecture = await Lecture.findById(req.params.id);
+  if (!lecture) return res.status(404).json({ error: { message: 'Lecture not found' } });
+  if (lecture.createdBy.toString() !== req.user.sub) return res.status(403).json({ error: { message: 'Forbidden' } });
+  lecture.status = 'draft';
+  await lecture.save();
+  res.json({ lecture });
+});
+
+router.get('/:id/download', requireAuth, async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: { message: 'Invalid id' } });
+  const lecture = await Lecture.findById(req.params.id);
+  if (!lecture) return res.status(404).json({ error: { message: 'Lecture not found' } });
+
+  const isOwner = req.user.role === 'teacher' && lecture.createdBy.toString() === req.user.sub;
+  const isStudentAllowed = req.user.role === 'student' && lecture.status === 'published';
+  if (!isOwner && !isStudentAllowed) return res.status(403).json({ error: { message: 'Forbidden' } });
+  if (lecture.sourceType !== 'file') {
+    return res.status(400).json({ error: { message: 'Download is only available for file lectures' } });
+  }
+
+  const quality = req.query.quality;
+  let targetFile = lecture.file;
+  
+  if (targetFile.cloudinaryUrl) {
+    // Cloudinary download: use fl_attachment flag
+    // e.g., https://res.cloudinary.com/cloud_name/video/upload/fl_attachment/v1234/public_id.mp4
+    let url = targetFile.cloudinaryUrl;
+    if (url.includes('/upload/')) {
+      url = url.replace('/upload/', '/upload/fl_attachment/');
+    }
+    return res.redirect(url);
+  }
+
+  // Fallback for older local files
+  const absolutePath = path.resolve(process.cwd(), env.UPLOAD_DIR, targetFile.storedName);
+  if (!fs.existsSync(absolutePath)) return res.status(404).json({ error: { message: 'File missing on server' } });
+
+  res.setHeader('Content-Type', targetFile.mimeType);
+  res.setHeader('Content-Disposition', `attachment; filename="${(targetFile.originalName || targetFile.storedName).replace(/"/g, '')}"`);
+  return fs.createReadStream(absolutePath).pipe(res);
+});
+
+router.get('/:id/stream', requireAuth, async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: { message: 'Invalid id' } });
+  const lecture = await Lecture.findById(req.params.id);
+  if (!lecture) return res.status(404).json({ error: { message: 'Lecture not found' } });
+
+  const isOwner = req.user.role === 'teacher' && lecture.createdBy.toString() === req.user.sub;
+  const isStudentAllowed = req.user.role === 'student' && lecture.status === 'published';
+  if (!isOwner && !isStudentAllowed) return res.status(403).json({ error: { message: 'Forbidden' } });
+  if (lecture.sourceType !== 'file') {
+    return res.status(400).json({ error: { message: 'Streaming is only available for file lectures' } });
+  }
+
+  const quality = req.query.quality;
+  let targetFile = lecture.file;
+
+  if (targetFile.cloudinaryUrl) {
+    let url = targetFile.cloudinaryUrl;
+    // Disabling dynamic transcoding because Cloudinary free tier rejects 
+    // synchronous transformations for large videos.
+    // If you need quality selection, you must pre-generate variants using 'eager' transformations during upload.
+    return res.redirect(url);
+  }
+
+  // Fallback for older local files
+  const absolutePath = path.resolve(process.cwd(), env.UPLOAD_DIR, targetFile.storedName);
+  if (!fs.existsSync(absolutePath)) return res.status(404).json({ error: { message: 'File missing on server' } });
+
+  const stat = fs.statSync(absolutePath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunksize = end - start + 1;
+    const stream = fs.createReadStream(absolutePath, { start, end });
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunksize,
+      'Content-Type': targetFile.mimeType,
+    });
+    return stream.pipe(res);
+  } else {
+    res.writeHead(200, {
+      'Content-Length': fileSize,
+      'Content-Type': targetFile.mimeType,
+      'Accept-Ranges': 'bytes',
+    });
+    return fs.createReadStream(absolutePath).pipe(res);
+  }
+});
+
+router.delete('/:id', requireAuth, requireRole('teacher'), async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: { message: 'Invalid id' } });
+  const lecture = await Lecture.findById(req.params.id);
+  if (!lecture) return res.status(404).json({ error: { message: 'Lecture not found' } });
+  if (lecture.createdBy.toString() !== req.user.sub) return res.status(403).json({ error: { message: 'Forbidden' } });
+
+  // Delete from Cloudinary
+  if (lecture.file?.cloudinaryPublicId) {
+    try {
+      await cloudinary.uploader.destroy(lecture.file.cloudinaryPublicId, { resource_type: lecture.mediaType === 'video' ? 'video' : 'raw' });
+    } catch (e) {
+      console.error('Failed to delete from Cloudinary:', e);
+    }
+  }
+
+  // Delete from local filesystem if it existed locally
+  const absolutePath = lecture.file?.storedName && !lecture.file?.cloudinaryUrl
+    ? path.resolve(process.cwd(), env.UPLOAD_DIR, lecture.file.storedName)
+    : null;
+  await lecture.deleteOne();
+  try {
+    if (absolutePath && fs.existsSync(absolutePath)) fs.unlinkSync(absolutePath);
+  } catch {
+    // ignore delete errors
+  }
+
+  res.json({ ok: true });
+});
+
+export default router;
+
