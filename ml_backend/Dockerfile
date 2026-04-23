@@ -5,7 +5,9 @@ WORKDIR /app
 # Using opencv-python-headless so we don't need system libraries
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip uninstall -y opencv-python && \
+    pip install --no-cache-dir opencv-python-headless
 
 COPY . .
 
