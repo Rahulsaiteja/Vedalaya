@@ -5,7 +5,7 @@ numpy
 Pillow
 
 tf-keras
-tensorflow
+tensorflow-cpu
 scikit-learn
 requests
 gunicorn
