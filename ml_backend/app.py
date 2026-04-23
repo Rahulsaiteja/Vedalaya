@@ -8,8 +8,6 @@ import threading
 import subprocess
 import requests
 
-# Force TensorFlow to use legacy Keras 2 (required for loading older models with renorm)
-os.environ['TF_USE_LEGACY_KERAS'] = '1'
 # Prevent GPU memory allocation and minimize TF logs
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
