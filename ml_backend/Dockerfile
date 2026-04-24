@@ -9,6 +9,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Run with Gunicorn, binding to PORT environment variable with a fallback to 5001
+# Render injects PORT at runtime. Gunicorn binds to it directly.
 # We use a single worker with threads to safely handle background training
-CMD ["sh", "-c", "gunicorn -w 1 --threads 4 -b 0.0.0.0:${PORT:-5001} --timeout 120 app:app"]
+CMD gunicorn -w 1 --threads 4 -b 0.0.0.0:$PORT --timeout 120 app:app
