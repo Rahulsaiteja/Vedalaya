@@ -1,6 +1,7 @@
 import os
 import cv2
 import numpy as np
+import urllib.request
 
 import os
 
@@ -16,27 +17,72 @@ IMG_SIZE    = 160   # MobileNetV2 works best at 160x160
 BATCH_SIZE  = 32
 EPOCHS      = 30
 
-# Haar cascade bundled with OpenCV
+# ── DNN Face Detector ────────────────────────────────────────────────────────
+DNN_PROTOTXT   = "deploy.prototxt"
+DNN_CAFFEMODEL = "res10_300x300_ssd_iter_140000.caffemodel"
+_PROTOTXT_URL  = "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt"
+_CAFFEMODEL_URL = "https://github.com/opencv/opencv_3rdparty/raw/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel"
+
+# Haar cascade kept as fallback
 CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
 
+def _download_dnn_files():
+    for path, url in [(DNN_PROTOTXT, _PROTOTXT_URL), (DNN_CAFFEMODEL, _CAFFEMODEL_URL)]:
+        if not os.path.exists(path):
+            print(f"Downloading {path} ...")
+            try:
+                urllib.request.urlretrieve(url, path)
+                print(f"  ✓ {path} downloaded.")
+            except Exception as e:
+                print(f"  ✗ Failed to download {path}: {e}")
+
+_download_dnn_files()
+dnn_net = None
+if os.path.exists(DNN_PROTOTXT) and os.path.exists(DNN_CAFFEMODEL):
+    dnn_net = cv2.dnn.readNetFromCaffe(DNN_PROTOTXT, DNN_CAFFEMODEL)
+    print("DNN face detector loaded for training.")
+else:
+    print("DNN files missing — using Haar cascade for training.")
+
 
 def crop_face(img_bgr, padding=0.25):
-    """Detect the largest face and return a padded crop. Returns None if no face found."""
-    gray  = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    faces = face_cascade.detectMultiScale(
-        gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
-    )
-    if len(faces) == 0:
-        return None
+    """Detect the largest face using DNN detector (Haar fallback). Returns padded crop or None."""
+    h, w = img_bgr.shape[:2]
 
-    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-    pad_x = int(w * padding)
-    pad_y = int(h * padding)
-    H, W  = img_bgr.shape[:2]
+    if dnn_net is not None:
+        blob = cv2.dnn.blobFromImage(cv2.resize(img_bgr, (300, 300)), 1.0,
+                                      (300, 300), (104.0, 177.0, 123.0))
+        dnn_net.setInput(blob)
+        detections = dnn_net.forward()
 
-    x1, y1 = max(0, x - pad_x), max(0, y - pad_y)
-    x2, y2 = min(W, x + w + pad_x), min(H, y + h + pad_y)
+        best_conf, best_box = 0, None
+        for i in range(detections.shape[2]):
+            conf = detections[0, 0, i, 2]
+            if conf > best_conf:
+                best_conf = conf
+                best_box  = detections[0, 0, i, 3:7]
+
+        if best_box is None or best_conf < 0.5:
+            return None
+
+        box = best_box * np.array([w, h, w, h])
+        x1, y1, x2, y2 = box.astype(int)
+    else:
+        # Haar fallback
+        gray  = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        if len(faces) == 0:
+            return None
+        x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+        x1, y1, x2, y2 = x, y, x + fw, y + fh
+
+    pad_x = int((x2 - x1) * padding)
+    pad_y = int((y2 - y1) * padding)
+    x1 = max(0, x1 - pad_x)
+    y1 = max(0, y1 - pad_y)
+    x2 = min(w, x2 + pad_x)
+    y2 = min(h, y2 + pad_y)
     return img_bgr[y1:y2, x1:x2]
 
 

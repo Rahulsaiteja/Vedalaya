@@ -7,11 +7,12 @@ import { User } from '../models/User.js';
 import ClassGroup from '../models/ClassGroup.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { sendTrainingCompleteEmail } from '../utils/email.js';
+import { env } from '../utils/env.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-const ML_URL = () => process.env.ML_SERVICE_URL || 'http://localhost:5001';
+const ML_URL = () => env.ML_SERVICE_URL;
 
 // ── Mark attendance via face recognition ──────────────────────────────
 // classGroupId is optional; if provided, attendance is tied to the class
@@ -219,9 +220,42 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
+// ── Teacher: proxy face registration to ML service ────────────────────
+// Keeps the ML service URL server-side; browser never calls ML directly
+router.post('/register-face', requireAuth, requireRole('teacher'), upload.fields([{ name: 'images' }]), async (req, res) => {
+  try {
+    const { name, teacherEmail } = req.body;
+    if (!name) return res.status(400).json({ error: 'Student name is required.' });
+
+    const files = req.files?.images;
+    if (!files || files.length === 0) return res.status(400).json({ error: 'No images uploaded.' });
+
+    const formData = new FormData();
+    formData.append('name', name);
+    if (teacherEmail) formData.append('teacherEmail', teacherEmail);
+    for (const file of files) {
+      formData.append('images', file.buffer, { filename: 'frame.jpg', contentType: file.mimetype || 'image/jpeg' });
+    }
+
+    const mlRes = await axios.post(`${ML_URL()}/register-face`, formData, {
+      headers: { ...formData.getHeaders() },
+      maxBodyLength: Infinity,
+    });
+    return res.status(mlRes.status).json(mlRes.data);
+  } catch (err) {
+    const status = err.response?.status || 500;
+    return res.status(status).json({ error: err.response?.data?.error || 'ML service error.' });
+  }
+});
+
 // ── Webhook: ML service notifies that training is complete ─────────────
+// Protected by a shared secret to prevent abuse
 router.post('/notify-training', async (req, res) => {
   try {
+    const secret = req.headers['x-webhook-secret'];
+    if (!secret || secret !== env.WEBHOOK_SECRET) {
+      return res.status(401).json({ error: 'Unauthorized.' });
+    }
     const { name, email } = req.body;
     if (!name || !email) {
       return res.status(400).json({ error: 'Name and email required.' });

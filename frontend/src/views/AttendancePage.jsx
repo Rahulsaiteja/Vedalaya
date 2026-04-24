@@ -269,17 +269,15 @@ function RegisterStudentTab() {
         const blob = await (await fetch(b64)).blob()
         formData.append('images', blob, 'frame.jpg')
       }
-      const mlApiBase = import.meta.env.VITE_ML_API_BASE || 'http://localhost:5001'
-      const res = await fetch(`${mlApiBase}/register-face`, {
-        method: 'POST',
-        body: formData,
+      const res = await api.post('/attendance/register-face', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Upload failed')
+      const data = res.data
+      if (res.status >= 400) throw new Error(data.error || 'Upload failed')
       setResult(data)
       setCaptured([])
     } catch (err) {
-      setError(err.message)
+      setError(err?.response?.data?.error || err.message)
     } finally {
       setUploading(false)
     }

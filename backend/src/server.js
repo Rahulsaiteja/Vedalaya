@@ -22,9 +22,6 @@ import scholarshipRoutes from './routes/scholarships.js';
 import attendanceRoutes from './routes/attendance.js';
 import classRoutes from './routes/classes.js';
 import adminRoutes from './routes/admin.js';
-dotenv.config();
-
-
 
 const app = express();
 

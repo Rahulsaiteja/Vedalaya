@@ -7,6 +7,7 @@ import numpy as np
 import threading
 import subprocess
 import requests
+import urllib.request
 
 # Prevent GPU memory allocation and minimize TF logs
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
@@ -29,12 +30,72 @@ MODEL_PATH = "custom_face_model.keras"
 CLASS_NAMES_PATH = "class_names.json"
 IMG_SIZE = 160   # MobileNetV2 input size
 
+# Confidence threshold — softmax always sums to 1.0 so keep this high
+CONFIDENCE_THRESHOLD = 0.85
+
 # Load global variables for the model
 custom_model = None
 class_names = []
 
-# Load the cascade classifier for face detection
+# ── DNN Face Detector ────────────────────────────────────────────────────────
+DNN_PROTOTXT  = "deploy.prototxt"
+DNN_CAFFEMODEL = "res10_300x300_ssd_iter_140000.caffemodel"
+_PROTOTXT_URL  = "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt"
+_CAFFEMODEL_URL = "https://github.com/opencv/opencv_3rdparty/raw/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel"
+
+dnn_net = None  # OpenCV DNN face detector
+# Haar cascade kept as fallback in case DNN files can't be downloaded
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+def _download_dnn_files():
+    """Download DNN detector weights if not already present."""
+    for path, url in [(DNN_PROTOTXT, _PROTOTXT_URL), (DNN_CAFFEMODEL, _CAFFEMODEL_URL)]:
+        if not os.path.exists(path):
+            print(f"Downloading {path} ...")
+            try:
+                urllib.request.urlretrieve(url, path)
+                print(f"  ✓ {path} downloaded.")
+            except Exception as e:
+                print(f"  ✗ Failed to download {path}: {e}")
+
+def load_dnn_detector():
+    global dnn_net
+    _download_dnn_files()
+    if os.path.exists(DNN_PROTOTXT) and os.path.exists(DNN_CAFFEMODEL):
+        dnn_net = cv2.dnn.readNetFromCaffe(DNN_PROTOTXT, DNN_CAFFEMODEL)
+        print("DNN face detector loaded.")
+    else:
+        print("DNN detector files missing — falling back to Haar cascade.")
+
+def detect_faces_dnn(img, conf_threshold=0.5):
+    """
+    Returns list of (x, y, w, h) bounding boxes using the SSD DNN detector.
+    Falls back to Haar cascade if DNN is unavailable.
+    """
+    if dnn_net is None:
+        gray  = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        return face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5, minSize=(30, 30))
+
+    h, w = img.shape[:2]
+    blob = cv2.dnn.blobFromImage(cv2.resize(img, (300, 300)), 1.0,
+                                  (300, 300), (104.0, 177.0, 123.0))
+    dnn_net.setInput(blob)
+    detections = dnn_net.forward()
+
+    boxes = []
+    for i in range(detections.shape[2]):
+        confidence = detections[0, 0, i, 2]
+        if confidence < conf_threshold:
+            continue
+        box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+        x1, y1, x2, y2 = box.astype(int)
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        boxes.append((x1, y1, x2 - x1, y2 - y1))
+    return boxes
+
+# Initialise DNN detector at startup
+load_dnn_detector()
 
 def load_custom_model():
     global custom_model, class_names
@@ -67,12 +128,13 @@ def background_train(name=None, teacher_email=None):
         # Notify Node.js backend
         if name and teacher_email:
             node_url = os.environ.get('NODE_API_URL', 'http://localhost:5000')
+            webhook_secret = os.environ.get('WEBHOOK_SECRET', '')
             try:
                 print(f"Sending notification webhook to {node_url} for {teacher_email}")
                 requests.post(f"{node_url}/api/attendance/notify-training", json={
                     "name": name,
                     "email": teacher_email
-                }, timeout=10)
+                }, headers={"x-webhook-secret": webhook_secret}, timeout=10)
             except Exception as e:
                 print(f"Failed to send notification webhook: {e}")
                 
@@ -120,10 +182,8 @@ def predict():
         if img is None:
             return jsonify({"error": "Invalid image file."}), 400
             
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        
-        # Detect faces in the image
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5, minSize=(30, 30))
+        # Detect faces using DNN detector (falls back to Haar if unavailable)
+        faces = detect_faces_dnn(img)
         
         if len(faces) == 0:
             if os.path.exists(temp_filename): os.remove(temp_filename)
@@ -156,8 +216,8 @@ def predict():
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
             
-        # Threshold for recognition (e.g., 60% confidence)
-        if confidence < 0.6:
+        # Threshold for recognition — 85% to avoid false positives with softmax
+        if confidence < CONFIDENCE_THRESHOLD:
             return jsonify({
                 "error": "No confident match found. Face unrecognized.",
                 "confidence": confidence
@@ -215,10 +275,8 @@ def register_face():
                 skipped += 1
                 continue
 
-            # Detect face in the uploaded image
-            gray  = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1,
-                                                  minNeighbors=5, minSize=(30, 30))
+            # Detect face using DNN detector
+            faces = detect_faces_dnn(img)
             if len(faces) == 0:
                 skipped += 1
                 continue

@@ -1,5 +1,6 @@
 import express from "express";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { env } from "../utils/env.js";
 
 const router = express.Router();
 
@@ -7,14 +8,12 @@ router.post("/chat", async (req, res) => {
   try {
     const { message } = req.body;
 
-    // ✅ Basic validation
     if (!message || message.trim() === "") {
       return res.json({ reply: "Please enter a valid question." });
     }
 
     const userMessage = message.toLowerCase();
 
-    // ✅ Quick local responses (faster than API)
     if (userMessage.includes("hello") || userMessage.includes("hi")) {
       return res.json({
         reply: "Hello! I am Vedalaya AI Assistant. How can I help you today?",
@@ -23,20 +22,17 @@ router.post("/chat", async (req, res) => {
 
     if (userMessage.includes("login")) {
       return res.json({
-        reply:
-          "To login, click on the Login button on the homepage and enter your email and password.",
+        reply: "To login, click on the Login button on the homepage and enter your email and password.",
       });
     }
 
     if (userMessage.includes("register") || userMessage.includes("signup")) {
       return res.json({
-        reply:
-          "To create an account, click on Register and fill in your details.",
+        reply: "To create an account, click on Register and fill in your details.",
       });
     }
 
-    // ✅ Main Gemini API call
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     
     const prompt = `
