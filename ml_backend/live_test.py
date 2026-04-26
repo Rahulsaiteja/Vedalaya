@@ -6,7 +6,6 @@ Press 'Q' to quit.
 """
 
 import os
-os.environ['TF_USE_LEGACY_KERAS'] = '1'  # Force Keras 2 compatibility
 
 import cv2
 import numpy as np

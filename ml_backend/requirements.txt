@@ -4,8 +4,7 @@ opencv-python-headless
 numpy
 Pillow
 
-tf-keras
-tensorflow-cpu
+tensorflow-cpu==2.13.1
 scikit-learn
 requests
 gunicorn

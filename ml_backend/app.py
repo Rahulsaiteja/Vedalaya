@@ -10,7 +10,6 @@ import requests
 import urllib.request
 
 # Prevent GPU memory allocation and minimize TF logs
-os.environ['TF_USE_LEGACY_KERAS'] = '1'  # MUST be set before importing tensorflow to fix Keras 2 -> Keras 3 deserialization errors
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
