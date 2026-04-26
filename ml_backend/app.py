@@ -97,8 +97,10 @@ def detect_faces_dnn(img, conf_threshold=0.5):
 # Initialise DNN detector at startup
 load_dnn_detector()
 
+is_loading_model = True
+
 def load_custom_model():
-    global custom_model, class_names
+    global custom_model, class_names, is_loading_model
     if os.path.exists(MODEL_PATH) and os.path.exists(CLASS_NAMES_PATH):
         print("Loading custom trained model...")
         try:
@@ -108,8 +110,11 @@ def load_custom_model():
             print(f"Model loaded with classes: {class_names}")
         except Exception as e:
             print(f"\nCRITICAL ERROR LOADING MODEL: {e}\n")
+        finally:
+            is_loading_model = False
     else:
         print("Custom model not found. Please run train_model.py first.")
+        is_loading_model = False
 
 
 def auto_train_if_needed():
@@ -151,9 +156,12 @@ def auto_train_if_needed():
         pass  # Model exists, nothing to do
 
 
-# On startup: load existing model OR auto-train if missing
-auto_train_if_needed()
-load_custom_model()
+# Move startup logic to a background thread so Gunicorn doesn't block and fail Render port scan
+def startup_task():
+    auto_train_if_needed()
+    load_custom_model()
+
+threading.Thread(target=startup_task, daemon=True).start()
 
 is_training = False
 
@@ -189,7 +197,12 @@ def get_status():
     if not os.path.exists(DATASET_DIR):
         return jsonify({"status": "Dataset directory not found."}), 503
         
-    model_status = "Loaded" if custom_model is not None else "Not Trained"
+    if is_loading_model:
+        model_status = "Loading (starting up...)"
+    elif custom_model is not None:
+        model_status = "Loaded"
+    else:
+        model_status = "Not Trained"
     
     # Get all subdirectories in dataset
     classes = [d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))]
@@ -203,6 +216,9 @@ def get_status():
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    if is_loading_model:
+        return jsonify({"error": "Service is still starting up and loading the ML model. Please try again in a minute."}), 503
+
     if 'image' not in request.files:
         return jsonify({"error": "No image part in the request"}), 400
         
