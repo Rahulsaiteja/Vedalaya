@@ -127,10 +127,11 @@ def load_data():
 def build_augmentation():
     return models.Sequential([
         layers.RandomFlip("horizontal"),
-        layers.RandomRotation(0.1),
-        layers.RandomZoom(0.1),
-        layers.RandomBrightness(0.2),
-        layers.RandomContrast(0.2),
+        layers.RandomRotation(0.15),        # more rotation variety
+        layers.RandomZoom(0.15),            # more zoom variety
+        layers.RandomBrightness(0.3),       # handle lighting changes
+        layers.RandomContrast(0.3),         # handle contrast changes
+        layers.RandomTranslation(0.1, 0.1), # slight position shifts
     ], name="augmentation")
 
 
@@ -164,7 +165,11 @@ def build_model(num_classes):
     model = tf.keras.Model(inputs, outputs)
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-        loss='sparse_categorical_crossentropy',
+        # Label smoothing forces the model to be more confident and
+        # discriminative — reduces overconfident wrong predictions
+        loss=tf.keras.losses.CategoricalCrossentropy(
+            from_logits=False, label_smoothing=0.1
+        ),
         metrics=['accuracy']
     )
     return model, base
@@ -218,25 +223,31 @@ def main():
         ),
     ]
 
+    # One-hot encode for label smoothing loss
+    y_train_oh = tf.keras.utils.to_categorical(y_train, num_classes=len(classes))
+    y_val_oh   = tf.keras.utils.to_categorical(y_val,   num_classes=len(classes))
+
     history1 = model.fit(
-        X_train, y_train,
+        X_train, y_train_oh,
         epochs=15,
         batch_size=BATCH_SIZE,
-        validation_data=(X_val, y_val),
+        validation_data=(X_val, y_val_oh),
         callbacks=cb_phase1
     )
 
     # [4b] Phase 2 — unfreeze top 30 layers and fine-tune
     print("\n[5/5] Phase 2: Fine-tuning top layers of MobileNetV2...")
     base.trainable = True
-    # Freeze everything except the last 30 layers
-    for layer in base.layers[:-30]:
+    # Unfreeze top 50 layers for better fine-grained face feature learning
+    for layer in base.layers[:-50]:
         layer.trainable = False
 
     # Recompile with a much lower LR for fine-tuning
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5),
-        loss='sparse_categorical_crossentropy',
+        loss=tf.keras.losses.CategoricalCrossentropy(
+            from_logits=False, label_smoothing=0.1
+        ),
         metrics=['accuracy']
     )
 
@@ -255,10 +266,10 @@ def main():
     ]
 
     history2 = model.fit(
-        X_train, y_train,
+        X_train, y_train_oh,
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
-        validation_data=(X_val, y_val),
+        validation_data=(X_val, y_val_oh),
         callbacks=cb_phase2
     )
 
@@ -274,7 +285,8 @@ def main():
     print("=" * 55)
     model  = tf.keras.models.load_model("custom_face_model.keras")
     y_pred = np.argmax(model.predict(X_val), axis=1)
-    print(classification_report(y_val, y_pred,
+    y_val_labels = np.argmax(y_val_oh, axis=1)
+    print(classification_report(y_val_labels, y_pred,
                                  target_names=classes, zero_division=0))
 
     best_acc = max(all_val_acc) * 100

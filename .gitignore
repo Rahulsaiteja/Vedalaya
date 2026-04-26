@@ -7,3 +7,11 @@
 **/.vite/
 **/coverage/
 **/*.log
+
+# ML large binary files (too large for GitHub free tier)
+ml_backend/*.caffemodel
+ml_backend/*.keras
+ml_backend/custom_face_model.h5
+
+# Temp files
+ml_backend/temp_incoming_face.jpg

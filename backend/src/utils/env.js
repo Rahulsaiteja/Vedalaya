@@ -22,7 +22,7 @@ const envSchema = z.object({
   CLOUDINARY_API_SECRET: z.string().min(1),
   ML_SERVICE_URL: z.string().default('http://localhost:5001'),
   GEMINI_API_KEY: z.string().min(1),
-  WEBHOOK_SECRET: z.string().min(8),
+  WEBHOOK_SECRET: z.string().min(8).optional(),
 });
 
 export const env = envSchema.parse(process.env);

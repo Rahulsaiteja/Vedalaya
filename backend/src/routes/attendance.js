@@ -253,7 +253,7 @@ router.post('/register-face', requireAuth, requireRole('teacher'), upload.fields
 router.post('/notify-training', async (req, res) => {
   try {
     const secret = req.headers['x-webhook-secret'];
-    if (!secret || secret !== env.WEBHOOK_SECRET) {
+    if (env.WEBHOOK_SECRET && (!secret || secret !== env.WEBHOOK_SECRET)) {
       return res.status(401).json({ error: 'Unauthorized.' });
     }
     const { name, email } = req.body;
