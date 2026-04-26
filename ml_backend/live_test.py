@@ -11,8 +11,12 @@ import tensorflow as tf
 import json
 import time
 
-MODEL_PATH      = "custom_face_model.keras"
-CLASS_NAMES_PATH = "class_names.json"
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+MODEL_PATH      = os.path.join(BASE_DIR, "custom_face_model.keras")
+CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.json")
 IMG_SIZE        = 160          # must match training
 CONFIDENCE_THRESHOLD = 0.75   # show name only if >= 75% confident
 

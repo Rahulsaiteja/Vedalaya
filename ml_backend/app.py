@@ -24,10 +24,12 @@ app = Flask(__name__)
 # Enable CORS so the React frontend or Node backend can call this API
 CORS(app)
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Dataset directory where faces are stored
-DATASET_DIR = "dataset"
-MODEL_PATH = "custom_face_model.keras"
-CLASS_NAMES_PATH = "class_names.json"
+DATASET_DIR = os.path.join(BASE_DIR, "dataset")
+MODEL_PATH = os.path.join(BASE_DIR, "custom_face_model.keras")
+CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.json")
 IMG_SIZE = 160   # MobileNetV2 input size
 
 # Confidence threshold — softmax always sums to 1.0 so keep this high
@@ -38,8 +40,8 @@ custom_model = None
 class_names = []
 
 # ── DNN Face Detector ────────────────────────────────────────────────────────
-DNN_PROTOTXT  = "deploy.prototxt"
-DNN_CAFFEMODEL = "res10_300x300_ssd_iter_140000.caffemodel"
+DNN_PROTOTXT  = os.path.join(BASE_DIR, "deploy.prototxt")
+DNN_CAFFEMODEL = os.path.join(BASE_DIR, "res10_300x300_ssd_iter_140000.caffemodel")
 _PROTOTXT_URL  = "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt"
 _CAFFEMODEL_URL = "https://github.com/opencv/opencv_3rdparty/raw/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel"
 
@@ -98,9 +100,10 @@ def detect_faces_dnn(img, conf_threshold=0.5):
 load_dnn_detector()
 
 is_loading_model = False
+model_load_error = "Model not yet initialized."
 
 def load_custom_model():
-    global custom_model, class_names, is_loading_model
+    global custom_model, class_names, is_loading_model, model_load_error
     is_loading_model = True
     print("Loading custom trained model (lazy load)...")
     try:
@@ -109,10 +112,13 @@ def load_custom_model():
             with open(CLASS_NAMES_PATH, "r") as f:
                 class_names = json.load(f)
             print(f"Model loaded with classes: {class_names}")
+            model_load_error = None
         else:
             print("Custom model not found on disk.")
+            model_load_error = f"Files not found. Model: {os.path.exists(MODEL_PATH)} ({MODEL_PATH}), Classes: {os.path.exists(CLASS_NAMES_PATH)} ({CLASS_NAMES_PATH})"
     except Exception as e:
         print(f"\nCRITICAL ERROR LOADING MODEL: {e}\n")
+        model_load_error = f"Exception during load: {str(e)}"
     finally:
         is_loading_model = False
 
@@ -138,7 +144,8 @@ def auto_train_if_needed():
             print("="*55)
             try:
                 result = subprocess.run(
-                    ["python", "train_model.py"],
+                    ["python", os.path.join(BASE_DIR, "train_model.py")],
+                    cwd=BASE_DIR,
                     check=True,
                     timeout=1800  # 30 min max
                 )
@@ -166,7 +173,7 @@ def background_train(name=None, teacher_email=None):
     try:
         is_training = True
         print(f"Starting background training for {name}...")
-        subprocess.run(["python", "train_model.py"], check=True)
+        subprocess.run(["python", os.path.join(BASE_DIR, "train_model.py")], cwd=BASE_DIR, check=True)
         print("Training completed. Reloading model...")
         load_custom_model()
         
@@ -222,7 +229,7 @@ def predict():
         return jsonify({"error": "Service is warming up and loading the ML model. This takes about 45 seconds. Please try again."}), 503
 
     if custom_model is None:
-        return jsonify({"error": "Failed to load custom model. Model files missing."}), 500
+        return jsonify({"error": f"Failed to load custom model. Detail: {model_load_error}"}), 500
 
     if 'image' not in request.files:
         return jsonify({"error": "No image part in the request"}), 400
@@ -236,7 +243,7 @@ def predict():
 
     try:
         # Save the uploaded file temporarily
-        temp_filename = "temp_incoming_face.jpg"
+        temp_filename = os.path.join(BASE_DIR, "temp_incoming_face.jpg")
         file.save(temp_filename)
 
         # Read the image with OpenCV
@@ -294,8 +301,8 @@ def predict():
 
     except Exception as e:
         print(f"Error during prediction: {str(e)}")
-        if os.path.exists("temp_incoming_face.jpg"):
-            os.remove("temp_incoming_face.jpg")
+        if os.path.exists(os.path.join(BASE_DIR, "temp_incoming_face.jpg")):
+            os.remove(os.path.join(BASE_DIR, "temp_incoming_face.jpg"))
         return jsonify({"error": str(e)}), 500
 
 @app.route('/reload-model', methods=['POST'])

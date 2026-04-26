@@ -13,7 +13,11 @@ import os
 import cv2
 import numpy as np
 
-DATASET_DIR = "dataset"
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+DATASET_DIR = os.path.join(BASE_DIR, "dataset")
 SAMPLE_COLS  = 5   # images per row in the preview grid
 SAMPLE_ROWS  = 4   # rows in the preview grid
 THUMB_SIZE   = 120 # px per thumbnail

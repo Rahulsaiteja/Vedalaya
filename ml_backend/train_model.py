@@ -12,14 +12,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import json
 
-DATASET_DIR = "dataset"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+DATASET_DIR = os.path.join(BASE_DIR, "dataset")
 IMG_SIZE    = 160   # MobileNetV2 works best at 160x160
 BATCH_SIZE  = 32
 EPOCHS      = 30
 
 # ── DNN Face Detector ────────────────────────────────────────────────────────
-DNN_PROTOTXT   = "deploy.prototxt"
-DNN_CAFFEMODEL = "res10_300x300_ssd_iter_140000.caffemodel"
+DNN_PROTOTXT   = os.path.join(BASE_DIR, "deploy.prototxt")
+DNN_CAFFEMODEL = os.path.join(BASE_DIR, "res10_300x300_ssd_iter_140000.caffemodel")
 _PROTOTXT_URL  = "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt"
 _CAFFEMODEL_URL = "https://github.com/opencv/opencv_3rdparty/raw/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel"
 
@@ -191,7 +193,7 @@ def main():
     print(f"\n  Total face crops : {len(X)}")
     print(f"  People ({len(classes)})       : {classes}")
 
-    with open('class_names.json', 'w') as f:
+    with open(os.path.join(BASE_DIR, 'class_names.json'), 'w') as f:
         json.dump(classes, f)
     print("  class_names.json saved.")
 
@@ -211,7 +213,7 @@ def main():
     print("\n[4/5] Phase 1: Training classifier head (base frozen)...")
     cb_phase1 = [
         callbacks.ModelCheckpoint(
-            "custom_face_model.keras",
+            os.path.join(BASE_DIR, "custom_face_model.keras"),
             monitor="val_accuracy", save_best_only=True, verbose=1
         ),
         callbacks.EarlyStopping(
@@ -253,7 +255,7 @@ def main():
 
     cb_phase2 = [
         callbacks.ModelCheckpoint(
-            "custom_face_model.keras",
+            os.path.join(BASE_DIR, "custom_face_model.keras"),
             monitor="val_accuracy", save_best_only=True, verbose=1
         ),
         callbacks.EarlyStopping(
@@ -283,7 +285,7 @@ def main():
     print("\n" + "=" * 55)
     print("  Per-Person Accuracy Report")
     print("=" * 55)
-    model  = tf.keras.models.load_model("custom_face_model.keras")
+    model  = tf.keras.models.load_model(os.path.join(BASE_DIR, "custom_face_model.keras"))
     y_pred = np.argmax(model.predict(X_val), axis=1)
     y_val_labels = np.argmax(y_val_oh, axis=1)
     print(classification_report(y_val_labels, y_pred,

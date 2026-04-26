@@ -4,8 +4,10 @@ import argparse
 import numpy as np
 import urllib.request
 
-DNN_PROTOTXT   = "deploy.prototxt"
-DNN_CAFFEMODEL = "res10_300x300_ssd_iter_140000.caffemodel"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+DNN_PROTOTXT   = os.path.join(BASE_DIR, "deploy.prototxt")
+DNN_CAFFEMODEL = os.path.join(BASE_DIR, "res10_300x300_ssd_iter_140000.caffemodel")
 _PROTOTXT_URL  = "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt"
 _CAFFEMODEL_URL = "https://github.com/opencv/opencv_3rdparty/raw/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel"
 
@@ -49,7 +51,7 @@ def main():
 
     name = args.name
     total_images = args.count
-    output_dir = os.path.join("dataset", name)
+    output_dir = os.path.join(BASE_DIR, "dataset", name)
     os.makedirs(output_dir, exist_ok=True)
 
     # Initialize DNN detector (download if needed) with Haar fallback
