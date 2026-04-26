@@ -97,23 +97,23 @@ def detect_faces_dnn(img, conf_threshold=0.5):
 # Initialise DNN detector at startup
 load_dnn_detector()
 
-is_loading_model = True
+is_loading_model = False
 
 def load_custom_model():
     global custom_model, class_names, is_loading_model
-    if os.path.exists(MODEL_PATH) and os.path.exists(CLASS_NAMES_PATH):
-        print("Loading custom trained model...")
-        try:
+    is_loading_model = True
+    print("Loading custom trained model (lazy load)...")
+    try:
+        if os.path.exists(MODEL_PATH) and os.path.exists(CLASS_NAMES_PATH):
             custom_model = tf.keras.models.load_model(MODEL_PATH)
             with open(CLASS_NAMES_PATH, "r") as f:
                 class_names = json.load(f)
             print(f"Model loaded with classes: {class_names}")
-        except Exception as e:
-            print(f"\nCRITICAL ERROR LOADING MODEL: {e}\n")
-        finally:
-            is_loading_model = False
-    else:
-        print("Custom model not found. Please run train_model.py first.")
+        else:
+            print("Custom model not found on disk.")
+    except Exception as e:
+        print(f"\nCRITICAL ERROR LOADING MODEL: {e}\n")
+    finally:
         is_loading_model = False
 
 
@@ -153,15 +153,9 @@ def auto_train_if_needed():
         else:
             print("No dataset found — skipping auto-training.")
     else:
-        pass  # Model exists, nothing to do
-
-
-# Move startup logic to a background thread so Gunicorn doesn't block and fail Render port scan
-def startup_task():
-    auto_train_if_needed()
-    load_custom_model()
-
-threading.Thread(target=startup_task, daemon=True).start()
+# We do NOT load the model at startup anymore.
+# This ensures the Flask app boots instantly and passes Render's health check.
+# The model will be loaded automatically on the first request.
 
 is_training = False
 
@@ -216,8 +210,17 @@ def get_status():
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    global custom_model
+    
+    # Lazy load the model on the first request
+    if custom_model is None and not is_loading_model:
+        load_custom_model()
+        
     if is_loading_model:
-        return jsonify({"error": "Service is still starting up and loading the ML model. Please try again in a minute."}), 503
+        return jsonify({"error": "Service is warming up and loading the ML model. This takes about 45 seconds. Please try again."}), 503
+
+    if custom_model is None:
+        return jsonify({"error": "Failed to load custom model. Model files missing."}), 500
 
     if 'image' not in request.files:
         return jsonify({"error": "No image part in the request"}), 400
