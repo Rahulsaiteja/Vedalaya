@@ -9,8 +9,7 @@
 **/*.log
 
 # ML large binary files (too large for GitHub free tier)
-ml_backend/*.caffemodel
-ml_backend/*.keras
+# Actually, they are under 50MB so we can commit them!
 ml_backend/custom_face_model.h5
 
 # Temp files
