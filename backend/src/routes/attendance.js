@@ -34,9 +34,13 @@ router.post('/mark', requireAuth, upload.single('image'), async (req, res) => {
         headers: { ...formData.getHeaders() },
       });
     } catch (apiErr) {
-      if (apiErr.response?.status === 404)
-        return res.status(404).json({ error: apiErr.response.data.error || 'Face not recognized.' });
-      return res.status(500).json({ error: 'ML service unavailable.', details: apiErr.message });
+      if (apiErr.response) {
+        // If the ML service responded with an error (e.g., 404, 503, 500)
+        const mlError = apiErr.response.data?.error || 'ML service returned an error.';
+        return res.status(apiErr.response.status).json({ error: mlError });
+      }
+      // If the ML service couldn't be reached at all (e.g., wrong URL, network error)
+      return res.status(500).json({ error: 'ML service could not be reached. Please check ML_SERVICE_URL.', details: apiErr.message });
     }
 
     const recognizedName = mlResponse.data.match;
