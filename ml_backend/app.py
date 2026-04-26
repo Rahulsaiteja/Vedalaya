@@ -111,7 +111,48 @@ def load_custom_model():
     else:
         print("Custom model not found. Please run train_model.py first.")
 
-# Initial load
+
+def auto_train_if_needed():
+    """
+    If no trained model exists (e.g. fresh Render deployment),
+    run train_model.py synchronously so the service is ready immediately.
+    This is the free-tier solution — no shell access needed.
+    """
+    if not os.path.exists(MODEL_PATH):
+        dataset_has_data = (
+            os.path.isdir(DATASET_DIR) and
+            any(
+                os.path.isdir(os.path.join(DATASET_DIR, d))
+                for d in os.listdir(DATASET_DIR)
+            )
+        )
+        if dataset_has_data:
+            print("="*55)
+            print("  No model found — auto-training from dataset...")
+            print("  This runs once on first deployment. Please wait.")
+            print("="*55)
+            try:
+                result = subprocess.run(
+                    ["python", "train_model.py"],
+                    check=True,
+                    timeout=1800  # 30 min max
+                )
+                print("Auto-training completed. Loading model...")
+                load_custom_model()
+            except subprocess.TimeoutExpired:
+                print("Auto-training timed out after 30 minutes.")
+            except subprocess.CalledProcessError as e:
+                print(f"Auto-training failed with exit code {e.returncode}.")
+            except Exception as e:
+                print(f"Auto-training error: {e}")
+        else:
+            print("No dataset found — skipping auto-training.")
+    else:
+        pass  # Model exists, nothing to do
+
+
+# On startup: load existing model OR auto-train if missing
+auto_train_if_needed()
 load_custom_model()
 
 is_training = False
