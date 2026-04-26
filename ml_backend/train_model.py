@@ -5,6 +5,8 @@ import urllib.request
 
 import os
 
+os.environ['TF_USE_LEGACY_KERAS'] = '1'  # Force Keras 2 compatibility to avoid deserialization errors in Keras 3
+
 import tensorflow as tf
 from tensorflow.keras import layers, models, callbacks
 from tensorflow.keras.applications import MobileNetV2
