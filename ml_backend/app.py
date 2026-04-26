@@ -28,7 +28,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Dataset directory where faces are stored
 DATASET_DIR = os.path.join(BASE_DIR, "dataset")
-MODEL_PATH = os.path.join(BASE_DIR, "custom_face_model.keras")
+MODEL_PATH = os.path.join(BASE_DIR, "custom_face_model_v2.h5")
 CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.json")
 IMG_SIZE = 160   # MobileNetV2 input size
 

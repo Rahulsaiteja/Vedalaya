@@ -213,7 +213,7 @@ def main():
     print("\n[4/5] Phase 1: Training classifier head (base frozen)...")
     cb_phase1 = [
         callbacks.ModelCheckpoint(
-            os.path.join(BASE_DIR, "custom_face_model.keras"),
+            os.path.join(BASE_DIR, "custom_face_model_v2.h5"),
             monitor="val_accuracy", save_best_only=True, verbose=1
         ),
         callbacks.EarlyStopping(
@@ -255,7 +255,7 @@ def main():
 
     cb_phase2 = [
         callbacks.ModelCheckpoint(
-            os.path.join(BASE_DIR, "custom_face_model.keras"),
+            os.path.join(BASE_DIR, "custom_face_model_v2.h5"),
             monitor="val_accuracy", save_best_only=True, verbose=1
         ),
         callbacks.EarlyStopping(
@@ -285,7 +285,7 @@ def main():
     print("\n" + "=" * 55)
     print("  Per-Person Accuracy Report")
     print("=" * 55)
-    model  = tf.keras.models.load_model(os.path.join(BASE_DIR, "custom_face_model.keras"))
+    model  = tf.keras.models.load_model(os.path.join(BASE_DIR, "custom_face_model_v2.h5"))
     y_pred = np.argmax(model.predict(X_val), axis=1)
     y_val_labels = np.argmax(y_val_oh, axis=1)
     print(classification_report(y_val_labels, y_pred,
