@@ -153,6 +153,8 @@ def auto_train_if_needed():
         else:
             print("No dataset found — skipping auto-training.")
     else:
+        pass
+
 # We do NOT load the model at startup anymore.
 # This ensures the Flask app boots instantly and passes Render's health check.
 # The model will be loaded automatically on the first request.
