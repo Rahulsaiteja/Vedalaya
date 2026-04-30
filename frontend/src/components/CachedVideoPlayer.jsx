@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-export default function CachedVideoPlayer({ src, mimeType, variants = [], processingStatus = 'completed' }) {
+export default function CachedVideoPlayer({ src, mimeType, variants = [], processingStatus = 'completed', cloudinaryUrl = null }) {
   // Default to 480p or 'original' if 480p not available
   const initialQuality = variants.find(v => v.quality === '480p')?.quality || 'original';
   
@@ -32,11 +32,18 @@ export default function CachedVideoPlayer({ src, mimeType, variants = [], proces
     const isPlaying = videoRef.current && !videoRef.current.paused;
 
     async function loadVideo() {
+      // If we have a direct Cloudinary URL, use it immediately to bypass the backend redirect
+      if (cloudinaryUrl) {
+        if (isMounted) {
+          setVideoUrl(cloudinaryUrl);
+          setLoading(false);
+        }
+        return;
+      }
+
       const token = getToken();
       const streamSrc = `${baseSrc}&token=${token}`;
       
-      // Native streaming is significantly faster and more reliable than blob caching
-      // Especially for Cloudinary redirects which may block CORS fetches or exceed memory limits
       if (isMounted) {
         setVideoUrl(streamSrc);
         setLoading(false);

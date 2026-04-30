@@ -178,6 +178,7 @@ export function StudentLecturesPage() {
                   mimeType={activeVideo.file.mimeType} 
                   variants={activeVideo.variants}
                   processingStatus={activeVideo.processingStatus}
+                  cloudinaryUrl={activeVideo.file.cloudinaryUrl}
                 />
               ) : (
                 <div className="text-white/50 p-12 text-center">Video format not supported or file missing.</div>
