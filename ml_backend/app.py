@@ -174,17 +174,29 @@ def startup_sequence():
             print(f"Downloaded {downloaded} face images. Starting auto-training...")
             is_training = True
             try:
-                subprocess.run(
+                result = subprocess.run(
                     ["python", os.path.join(BASE_DIR, "train_model.py")],
                     cwd=BASE_DIR, check=True,
-                    env={**os.environ, "DATA_DIR": DATA_DIR}
+                    env={**os.environ, "DATA_DIR": DATA_DIR},
+                    capture_output=True, text=True
                 )
-                with open(CLASS_NAMES_PATH, "r") as f:
-                    trained_classes = json.load(f)
-                storage.upload_model(MODEL_PATH, trained_classes)
-                with _model_lock:
-                    pass  # reset handled in load_custom_model
-                load_custom_model()
+                print("Training stdout:", result.stdout[-3000:] if result.stdout else "")
+                print("Training stderr:", result.stderr[-1000:] if result.stderr else "")
+
+                if os.path.exists(MODEL_PATH) and os.path.exists(CLASS_NAMES_PATH):
+                    with open(CLASS_NAMES_PATH, "r") as f:
+                        trained_classes = json.load(f)
+                    storage.upload_model(MODEL_PATH, trained_classes)
+                    # Reset so load_custom_model reloads fresh
+                    global custom_model
+                    custom_model = None
+                    load_custom_model()
+                else:
+                    print("ERROR: Training completed but model file not found!")
+            except subprocess.CalledProcessError as e:
+                print(f"Training process failed (exit {e.returncode})")
+                print("stdout:", e.stdout[-3000:] if e.stdout else "")
+                print("stderr:", e.stderr[-1000:] if e.stderr else "")
             except Exception as e:
                 print(f"Auto-training error: {e}")
             finally:
@@ -355,6 +367,44 @@ def reload_model():
     if custom_model is not None:
         return jsonify({"status": "Model reloaded successfully."})
     return jsonify({"error": model_load_error}), 500
+
+
+@app.route('/retrain', methods=['POST'])
+def retrain():
+    """Manually trigger retraining — syncs from Cloudinary and retrains."""
+    global is_training
+    if is_training:
+        return jsonify({"error": "Training already in progress."}), 409
+
+    def do_retrain():
+        global is_training, custom_model
+        is_training = True
+        try:
+            print("Manual retrain triggered — syncing dataset from Cloudinary...")
+            storage.download_all_faces(DATASET_DIR)
+            result = subprocess.run(
+                ["python", os.path.join(BASE_DIR, "train_model.py")],
+                cwd=BASE_DIR, check=True,
+                env={**os.environ, "DATA_DIR": DATA_DIR},
+                capture_output=True, text=True
+            )
+            print("Training stdout:", result.stdout[-3000:] if result.stdout else "")
+            if os.path.exists(MODEL_PATH) and os.path.exists(CLASS_NAMES_PATH):
+                with open(CLASS_NAMES_PATH, "r") as f:
+                    trained_classes = json.load(f)
+                storage.upload_model(MODEL_PATH, trained_classes)
+                custom_model = None
+                load_custom_model()
+                print("Retrain complete. Model loaded.")
+            else:
+                print("ERROR: Retrain finished but model file missing.")
+        except Exception as e:
+            print(f"Retrain error: {e}")
+        finally:
+            is_training = False
+
+    threading.Thread(target=do_retrain, daemon=True).start()
+    return jsonify({"status": "Retraining started. Check /status for progress."})
 
 
 if __name__ == '__main__':
