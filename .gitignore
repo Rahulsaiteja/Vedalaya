@@ -14,3 +14,8 @@ ml_backend/custom_face_model.keras
 
 # Temp files
 ml_backend/temp_incoming_face.jpg
+
+# Python cache
+**/__pycache__/
+**/*.pyc
+**/*.pyo

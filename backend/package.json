@@ -15,8 +15,10 @@
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@google/generative-ai": "^0.24.1",
+    "@vladmandic/face-api": "^1.7.15",
     "axios": "^1.14.0",
     "bcryptjs": "^3.0.3",
+    "canvas": "^3.2.3",
     "cloudinary": "^1.41.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
