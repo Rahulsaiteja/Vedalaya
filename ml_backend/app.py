@@ -21,11 +21,19 @@ app = Flask(__name__)
 CORS(app)
 
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
-DATASET_DIR    = os.path.join(BASE_DIR, "dataset")
-MODEL_PATH     = os.path.join(BASE_DIR, "custom_face_model_v2.h5")
-CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.json")
+
+# DATA_DIR points to Render persistent disk in production (/app/data)
+# Falls back to the app directory for local development
+DATA_DIR       = os.environ.get('DATA_DIR', BASE_DIR)
+
+DATASET_DIR    = os.path.join(DATA_DIR, "dataset")
+MODEL_PATH     = os.path.join(DATA_DIR, "custom_face_model_v2.h5")
+CLASS_NAMES_PATH = os.path.join(DATA_DIR, "class_names.json")
 IMG_SIZE       = 160
 CONFIDENCE_THRESHOLD = 0.85
+
+# Ensure persistent data dirs exist on startup
+os.makedirs(DATASET_DIR, exist_ok=True)
 
 # ── Model state ───────────────────────────────────────────────────────────────
 custom_model     = None

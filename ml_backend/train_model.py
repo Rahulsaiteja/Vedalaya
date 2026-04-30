@@ -12,12 +12,19 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import json
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
 
-DATASET_DIR = os.path.join(BASE_DIR, "dataset")
-IMG_SIZE    = 160   # MobileNetV2 works best at 160x160
+# DATA_DIR points to Render persistent disk in production (/app/data)
+# Falls back to the app directory for local development
+DATA_DIR  = os.environ.get('DATA_DIR', BASE_DIR)
+
+DATASET_DIR = os.path.join(DATA_DIR, "dataset")
+IMG_SIZE    = 160
 BATCH_SIZE  = 32
 EPOCHS      = 30
+
+# Ensure data dir exists
+os.makedirs(DATASET_DIR, exist_ok=True)
 
 # ── DNN Face Detector ────────────────────────────────────────────────────────
 DNN_PROTOTXT   = os.path.join(BASE_DIR, "deploy.prototxt")
@@ -192,7 +199,7 @@ def main():
     print(f"\n  Total face crops : {len(X)}")
     print(f"  People ({len(classes)})       : {classes}")
 
-    with open(os.path.join(BASE_DIR, 'class_names.json'), 'w') as f:
+    with open(os.path.join(DATA_DIR, 'class_names.json'), 'w') as f:
         json.dump(classes, f)
     print("  class_names.json saved.")
 
@@ -212,7 +219,7 @@ def main():
     print("\n[4/5] Phase 1: Training classifier head (base frozen)...")
     cb_phase1 = [
         callbacks.ModelCheckpoint(
-            os.path.join(BASE_DIR, "custom_face_model_v2.h5"),
+            os.path.join(DATA_DIR, "custom_face_model_v2.h5"),
             monitor="val_accuracy", save_best_only=True, verbose=1
         ),
         callbacks.EarlyStopping(
@@ -254,7 +261,7 @@ def main():
 
     cb_phase2 = [
         callbacks.ModelCheckpoint(
-            os.path.join(BASE_DIR, "custom_face_model_v2.h5"),
+            os.path.join(DATA_DIR, "custom_face_model_v2.h5"),
             monitor="val_accuracy", save_best_only=True, verbose=1
         ),
         callbacks.EarlyStopping(
@@ -284,7 +291,7 @@ def main():
     print("\n" + "=" * 55)
     print("  Per-Person Accuracy Report")
     print("=" * 55)
-    model  = tf.keras.models.load_model(os.path.join(BASE_DIR, "custom_face_model_v2.h5"))
+    model  = tf.keras.models.load_model(os.path.join(DATA_DIR, "custom_face_model_v2.h5"))
     y_pred = np.argmax(model.predict(X_val), axis=1)
     y_val_labels = np.argmax(y_val_oh, axis=1)
     print(classification_report(y_val_labels, y_pred,
