@@ -108,99 +108,39 @@ def load_custom_model():
             print(f"CRITICAL ERROR LOADING MODEL: {e}")
 
 def background_train(name=None, teacher_email=None):
-    global is_training, custom_model
-    try:
-        is_training = True
-        print(f"Background training started for: {name}")
-
-        # Download all face images from Cloudinary before training
-        print("Syncing dataset from Cloudinary...")
-        storage.download_all_faces(DATASET_DIR)
-
-        subprocess.run(
-            ["python", os.path.join(BASE_DIR, "train_model.py")],
-            cwd=BASE_DIR, check=True,
-            env={**os.environ, "DATA_DIR": DATA_DIR}
-        )
-        print("Training done. Uploading model to Cloudinary...")
-
-        # Upload trained model to Cloudinary for persistence
-        with open(CLASS_NAMES_PATH, "r") as f:
-            trained_classes = json.load(f)
-        storage.upload_model(MODEL_PATH, trained_classes)
-
-        # Reload model in memory
-        with _model_lock:
-            custom_model = None
-        load_custom_model()
-
-        # Notify Node backend
-        node_url       = os.environ.get('NODE_API_URL', 'http://localhost:5000')
-        webhook_secret = os.environ.get('WEBHOOK_SECRET', '')
-        if name and teacher_email:
-            try:
-                http_requests.post(
-                    f"{node_url}/api/attendance/notify-training",
-                    json={"name": name, "email": teacher_email},
-                    headers={"x-webhook-secret": webhook_secret},
-                    timeout=10
-                )
-            except Exception as e:
-                print(f"Webhook failed: {e}")
-    except Exception as e:
-        print(f"Training error: {e}")
-    finally:
-        is_training = False
+    """
+    On Render free tier we cannot train (not enough RAM).
+    Instead, notify the teacher to retrain locally and re-upload.
+    Face images are saved to Cloudinary for when local training runs.
+    """
+    node_url       = os.environ.get('NODE_API_URL', 'http://localhost:5000')
+    webhook_secret = os.environ.get('WEBHOOK_SECRET', '')
+    if name and teacher_email:
+        try:
+            http_requests.post(
+                f"{node_url}/api/attendance/notify-training",
+                json={"name": name, "email": teacher_email},
+                headers={"x-webhook-secret": webhook_secret},
+                timeout=10
+            )
+        except Exception as e:
+            print(f"Webhook failed: {e}")
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 load_dnn_detector()
 
 def startup_sequence():
     """
-    On startup:
-    1. Try to download trained model from Cloudinary
-    2. If no model but faces exist on Cloudinary → sync faces + auto-train
+    On startup: download the pre-trained model from Cloudinary.
+    Training is done locally and uploaded via upload_model_to_cloudinary.py.
+    We do NOT train on Render — not enough RAM on free tier.
     """
     global is_training, custom_model
-
-    # Step 1: try to load existing model from Cloudinary
     load_custom_model()
-
-    # Step 2: if still no model, sync dataset and trigger training
     if custom_model is None:
-        print("No model found — syncing dataset from Cloudinary...")
-        downloaded = storage.download_all_faces(DATASET_DIR)
-        if downloaded > 0:
-            print(f"Downloaded {downloaded} face images. Starting auto-training...")
-            is_training = True
-            try:
-                result = subprocess.run(
-                    ["python", os.path.join(BASE_DIR, "train_model.py")],
-                    cwd=BASE_DIR, check=True,
-                    env={**os.environ, "DATA_DIR": DATA_DIR},
-                    capture_output=True, text=True
-                )
-                print("Training stdout:", result.stdout[-3000:] if result.stdout else "")
-                print("Training stderr:", result.stderr[-1000:] if result.stderr else "")
-
-                if os.path.exists(MODEL_PATH) and os.path.exists(CLASS_NAMES_PATH):
-                    with open(CLASS_NAMES_PATH, "r") as f:
-                        trained_classes = json.load(f)
-                    storage.upload_model(MODEL_PATH, trained_classes)
-                    custom_model = None  # reset so load_custom_model reloads fresh
-                    load_custom_model()
-                else:
-                    print("ERROR: Training completed but model file not found!")
-            except subprocess.CalledProcessError as e:
-                print(f"Training process failed (exit {e.returncode})")
-                print("stdout:", e.stdout[-3000:] if e.stdout else "")
-                print("stderr:", e.stderr[-1000:] if e.stderr else "")
-            except Exception as e:
-                print(f"Auto-training error: {e}")
-            finally:
-                is_training = False
-        else:
-            print("No faces on Cloudinary yet — waiting for student registration.")
+        print("No model on Cloudinary yet.")
+        print("Train locally with: python train_model.py")
+        print("Then upload with:   python upload_model_to_cloudinary.py")
 
 threading.Thread(target=startup_sequence, daemon=True).start()
 
