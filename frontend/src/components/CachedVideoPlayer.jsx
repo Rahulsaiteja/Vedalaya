@@ -34,41 +34,12 @@ export default function CachedVideoPlayer({ src, mimeType, variants = [], proces
     async function loadVideo() {
       const token = getToken();
       const streamSrc = `${baseSrc}&token=${token}`;
-
-      try {
-        const cache = await caches.open('video-lectures-cache');
-        const cachedResponse = await cache.match(baseSrc);
-        
-        if (cachedResponse) {
-          const blob = await cachedResponse.blob();
-          if (isMounted) {
-            setVideoUrl(URL.createObjectURL(blob));
-            setLoading(false);
-            if (currentTime > 0 && videoRef.current) videoRef.current.currentTime = currentTime;
-          }
-          return;
-        }
-
-        const response = await fetch(streamSrc);
-        if (!response.ok) {
-          throw new Error('Failed to load video from server');
-        }
-
-        const responseToCache = response.clone();
-        await cache.put(baseSrc, responseToCache);
-
-        const blob = await response.blob();
-        if (isMounted) {
-          setVideoUrl(URL.createObjectURL(blob));
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error("Video downloading failed:", err);
-        if (isMounted) {
-          setError("Failed to prepare video for offline playback. Using direct stream instead.");
-          setVideoUrl(streamSrc);
-          setLoading(false);
-        }
+      
+      // Native streaming is significantly faster and more reliable than blob caching
+      // Especially for Cloudinary redirects which may block CORS fetches or exceed memory limits
+      if (isMounted) {
+        setVideoUrl(streamSrc);
+        setLoading(false);
       }
     }
 

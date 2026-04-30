@@ -38,7 +38,7 @@ router.post('/flashcards', requireAuth, requireRole('student'), async (req, res,
     }
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     
     const prompt = `You are a helpful educational assistant. Based on the provided text, generate up to ${maxCards} flashcards. 
 Extract the most important concepts, facts, or definitions. 
