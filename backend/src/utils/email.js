@@ -12,6 +12,9 @@ async function createTransporter() {
       user: env.SMTP_USER,
       pass: env.SMTP_PASS,
     },
+    connectionTimeout: 10000, // 10 seconds
+    greetingTimeout: 10000,
+    socketTimeout: 10000,
   });
   return transporter;
 }
