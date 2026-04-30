@@ -155,9 +155,8 @@ def build_model(num_classes):
     inputs = tf.keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
     x = build_augmentation()(inputs)
 
-    # MobileNetV2 expects inputs in [-1, 1]
-    x = tf.keras.applications.mobilenet_v2.preprocess_input(x)
-
+    # Preprocessing is now done OUTSIDE the model (before prediction)
+    # so the model can be loaded on any TF version without TrueDivide errors
     x = base(x, training=False)
     x = layers.GlobalAveragePooling2D()(x)
     x = layers.Dense(256, activation='relu')(x)

@@ -273,8 +273,10 @@ def predict():
         face_img = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
         face_img = cv2.resize(face_img, (IMG_SIZE, IMG_SIZE))
 
-        # Expand dims -> (1, 160, 160, 3)
+        # Expand dims and apply MobileNetV2 preprocessing (scale to [-1, 1])
+        # Done here instead of inside the model to avoid TrueDivide serialization errors
         input_data = np.expand_dims(face_img, axis=0).astype(np.float32)
+        input_data = (input_data / 127.5) - 1.0
         
         # Make a prediction with our custom CNN model!
         predictions = custom_model.predict(input_data)
