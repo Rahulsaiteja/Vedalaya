@@ -154,8 +154,45 @@ def background_train(name=None, teacher_email=None):
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 load_dnn_detector()
-# Load model in background so health check passes immediately
-threading.Thread(target=load_custom_model, daemon=True).start()
+
+def startup_sequence():
+    """
+    On startup:
+    1. Try to download trained model from Cloudinary
+    2. If no model but faces exist on Cloudinary → sync faces + auto-train
+    """
+    global is_training
+
+    # Step 1: try to load existing model from Cloudinary
+    load_custom_model()
+
+    # Step 2: if still no model, sync dataset and trigger training
+    if custom_model is None:
+        print("No model found — syncing dataset from Cloudinary...")
+        downloaded = storage.download_all_faces(DATASET_DIR)
+        if downloaded > 0:
+            print(f"Downloaded {downloaded} face images. Starting auto-training...")
+            is_training = True
+            try:
+                subprocess.run(
+                    ["python", os.path.join(BASE_DIR, "train_model.py")],
+                    cwd=BASE_DIR, check=True,
+                    env={**os.environ, "DATA_DIR": DATA_DIR}
+                )
+                with open(CLASS_NAMES_PATH, "r") as f:
+                    trained_classes = json.load(f)
+                storage.upload_model(MODEL_PATH, trained_classes)
+                with _model_lock:
+                    pass  # reset handled in load_custom_model
+                load_custom_model()
+            except Exception as e:
+                print(f"Auto-training error: {e}")
+            finally:
+                is_training = False
+        else:
+            print("No faces on Cloudinary yet — waiting for student registration.")
+
+threading.Thread(target=startup_sequence, daemon=True).start()
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -165,13 +202,14 @@ def health():
 
 @app.route('/status', methods=['GET'])
 def get_status():
-    classes = []
+    # Show local classes (populated after sync) or fall back to Cloudinary count
+    local_classes = []
     if os.path.isdir(DATASET_DIR):
-        classes = [d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))]
+        local_classes = [d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))]
     return jsonify({
         "status": "Running",
-        "classes": classes,
-        "model_status": "Loaded" if custom_model is not None else "Not Ready",
+        "classes": local_classes,
+        "model_status": "Loaded" if custom_model is not None else ("Training..." if is_training else "Not Ready"),
         "trained_classes": class_names,
         "is_training": is_training,
         "model_error": model_load_error,
