@@ -7,62 +7,42 @@ import numpy as np
 import threading
 import subprocess
 import requests
-import urllib.request
 
 # Prevent GPU memory allocation and minimize TF logs
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# We import tensorflow and keras to load the custom model
 import tensorflow as tf
 
-# Limit threads to save memory on Render Free tier
 tf.config.threading.set_inter_op_parallelism_threads(1)
 tf.config.threading.set_intra_op_parallelism_threads(1)
 
 app = Flask(__name__)
-# Enable CORS so the React frontend or Node backend can call this API
 CORS(app)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Dataset directory where faces are stored
-DATASET_DIR = os.path.join(BASE_DIR, "dataset")
-MODEL_PATH = os.path.join(BASE_DIR, "custom_face_model_v2.h5")
+BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
+DATASET_DIR    = os.path.join(BASE_DIR, "dataset")
+MODEL_PATH     = os.path.join(BASE_DIR, "custom_face_model_v2.h5")
 CLASS_NAMES_PATH = os.path.join(BASE_DIR, "class_names.json")
-IMG_SIZE = 160   # MobileNetV2 input size
-
-# Confidence threshold — softmax always sums to 1.0 so keep this high
+IMG_SIZE       = 160
 CONFIDENCE_THRESHOLD = 0.85
 
-# Load global variables for the model
-custom_model = None
-class_names = []
+# ── Model state ───────────────────────────────────────────────────────────────
+custom_model     = None
+class_names      = []
+model_load_error = "Model not loaded yet."
+_model_lock      = threading.Lock()   # prevents race condition on concurrent requests
+is_training      = False
 
-# ── DNN Face Detector ────────────────────────────────────────────────────────
-DNN_PROTOTXT  = os.path.join(BASE_DIR, "deploy.prototxt")
+# ── DNN Face Detector ─────────────────────────────────────────────────────────
+DNN_PROTOTXT   = os.path.join(BASE_DIR, "deploy.prototxt")
 DNN_CAFFEMODEL = os.path.join(BASE_DIR, "res10_300x300_ssd_iter_140000.caffemodel")
-_PROTOTXT_URL  = "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt"
-_CAFFEMODEL_URL = "https://github.com/opencv/opencv_3rdparty/raw/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel"
 
-dnn_net = None  # OpenCV DNN face detector
-# Haar cascade kept as fallback in case DNN files can't be downloaded
+dnn_net      = None
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-
-def _download_dnn_files():
-    """Download DNN detector weights if not already present."""
-    for path, url in [(DNN_PROTOTXT, _PROTOTXT_URL), (DNN_CAFFEMODEL, _CAFFEMODEL_URL)]:
-        if not os.path.exists(path):
-            print(f"Downloading {path} ...")
-            try:
-                urllib.request.urlretrieve(url, path)
-                print(f"  ✓ {path} downloaded.")
-            except Exception as e:
-                print(f"  ✗ Failed to download {path}: {e}")
 
 def load_dnn_detector():
     global dnn_net
-    _download_dnn_files()
     if os.path.exists(DNN_PROTOTXT) and os.path.exists(DNN_CAFFEMODEL):
         dnn_net = cv2.dnn.readNetFromCaffe(DNN_PROTOTXT, DNN_CAFFEMODEL)
         print("DNN face detector loaded.")
@@ -70,12 +50,9 @@ def load_dnn_detector():
         print("DNN detector files missing — falling back to Haar cascade.")
 
 def detect_faces_dnn(img, conf_threshold=0.5):
-    """
-    Returns list of (x, y, w, h) bounding boxes using the SSD DNN detector.
-    Falls back to Haar cascade if DNN is unavailable.
-    """
+    """Returns list of (x, y, w, h). Uses DNN detector, falls back to Haar."""
     if dnn_net is None:
-        gray  = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         return face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5, minSize=(30, 30))
 
     h, w = img.shape[:2]
@@ -86,8 +63,8 @@ def detect_faces_dnn(img, conf_threshold=0.5):
 
     boxes = []
     for i in range(detections.shape[2]):
-        confidence = detections[0, 0, i, 2]
-        if confidence < conf_threshold:
+        conf = detections[0, 0, i, 2]
+        if conf < conf_threshold:
             continue
         box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
         x1, y1, x2, y2 = box.astype(int)
@@ -96,234 +73,154 @@ def detect_faces_dnn(img, conf_threshold=0.5):
         boxes.append((x1, y1, x2 - x1, y2 - y1))
     return boxes
 
-# Initialise DNN detector at startup
-load_dnn_detector()
-
-is_loading_model = False
-model_load_error = "Model not yet initialized."
-
+# ── Model loading ─────────────────────────────────────────────────────────────
 def load_custom_model():
-    global custom_model, class_names, is_loading_model, model_load_error
-    is_loading_model = True
-    print("Loading custom trained model (lazy load)...")
-    try:
-        if os.path.exists(MODEL_PATH) and os.path.exists(CLASS_NAMES_PATH):
-            custom_model = tf.keras.models.load_model(MODEL_PATH)
-            with open(CLASS_NAMES_PATH, "r") as f:
-                class_names = json.load(f)
-            print(f"Model loaded with classes: {class_names}")
-            model_load_error = None
-        else:
-            print("Custom model not found on disk.")
-            model_load_error = f"Files not found. Model: {os.path.exists(MODEL_PATH)} ({MODEL_PATH}), Classes: {os.path.exists(CLASS_NAMES_PATH)} ({CLASS_NAMES_PATH})"
-    except Exception as e:
-        print(f"\nCRITICAL ERROR LOADING MODEL: {e}\n")
-        model_load_error = f"Exception during load: {str(e)}"
-    finally:
-        is_loading_model = False
-
-
-def auto_train_if_needed():
-    """
-    If no trained model exists (e.g. fresh Render deployment),
-    run train_model.py synchronously so the service is ready immediately.
-    This is the free-tier solution — no shell access needed.
-    """
-    if not os.path.exists(MODEL_PATH):
-        dataset_has_data = (
-            os.path.isdir(DATASET_DIR) and
-            any(
-                os.path.isdir(os.path.join(DATASET_DIR, d))
-                for d in os.listdir(DATASET_DIR)
-            )
-        )
-        if dataset_has_data:
-            print("="*55)
-            print("  No model found — auto-training from dataset...")
-            print("  This runs once on first deployment. Please wait.")
-            print("="*55)
-            try:
-                result = subprocess.run(
-                    ["python", os.path.join(BASE_DIR, "train_model.py")],
-                    cwd=BASE_DIR,
-                    check=True,
-                    timeout=1800  # 30 min max
+    global custom_model, class_names, model_load_error
+    with _model_lock:
+        # Double-check inside lock to avoid loading twice
+        if custom_model is not None:
+            return
+        print("Loading ML model...")
+        try:
+            if os.path.exists(MODEL_PATH) and os.path.exists(CLASS_NAMES_PATH):
+                custom_model = tf.keras.models.load_model(MODEL_PATH)
+                with open(CLASS_NAMES_PATH, "r") as f:
+                    class_names = json.load(f)
+                model_load_error = None
+                print(f"Model loaded. Classes: {class_names}")
+            else:
+                model_load_error = (
+                    f"Model file not found at {MODEL_PATH}. "
+                    "Register students to trigger training."
                 )
-                print("Auto-training completed. Loading model...")
-                load_custom_model()
-            except subprocess.TimeoutExpired:
-                print("Auto-training timed out after 30 minutes.")
-            except subprocess.CalledProcessError as e:
-                print(f"Auto-training failed with exit code {e.returncode}.")
-            except Exception as e:
-                print(f"Auto-training error: {e}")
-        else:
-            print("No dataset found — skipping auto-training.")
-    else:
-        pass
-
-# We do NOT load the model at startup anymore.
-# This ensures the Flask app boots instantly and passes Render's health check.
-# The model will be loaded automatically on the first request.
-
-is_training = False
+                print(model_load_error)
+        except Exception as e:
+            model_load_error = f"Load error: {str(e)}"
+            print(f"CRITICAL ERROR LOADING MODEL: {e}")
 
 def background_train(name=None, teacher_email=None):
-    global is_training
+    global is_training, custom_model
     try:
         is_training = True
-        print(f"Starting background training for {name}...")
-        subprocess.run(["python", os.path.join(BASE_DIR, "train_model.py")], cwd=BASE_DIR, check=True)
-        print("Training completed. Reloading model...")
+        print(f"Background training started for: {name}")
+        subprocess.run(
+            ["python", os.path.join(BASE_DIR, "train_model.py")],
+            cwd=BASE_DIR, check=True
+        )
+        print("Training done. Reloading model...")
+        # Reset so load_custom_model reloads fresh
+        with _model_lock:
+            custom_model = None
         load_custom_model()
-        
-        # Notify Node.js backend
+
+        # Notify Node backend
+        node_url      = os.environ.get('NODE_API_URL', 'http://localhost:5000')
+        webhook_secret = os.environ.get('WEBHOOK_SECRET', '')
         if name and teacher_email:
-            node_url = os.environ.get('NODE_API_URL', 'http://localhost:5000')
-            webhook_secret = os.environ.get('WEBHOOK_SECRET', '')
             try:
-                print(f"Sending notification webhook to {node_url} for {teacher_email}")
-                requests.post(f"{node_url}/api/attendance/notify-training", json={
-                    "name": name,
-                    "email": teacher_email
-                }, headers={"x-webhook-secret": webhook_secret}, timeout=10)
+                requests.post(
+                    f"{node_url}/api/attendance/notify-training",
+                    json={"name": name, "email": teacher_email},
+                    headers={"x-webhook-secret": webhook_secret},
+                    timeout=10
+                )
             except Exception as e:
-                print(f"Failed to send notification webhook: {e}")
-                
+                print(f"Webhook failed: {e}")
     except Exception as e:
-        print(f"Error during background training: {e}")
+        print(f"Training error: {e}")
     finally:
         is_training = False
 
+# ── Load detector at startup (files pre-downloaded in Docker build) ───────────
+load_dnn_detector()
+
+# ── Load model at startup in background so health check passes immediately ────
+threading.Thread(target=load_custom_model, daemon=True).start()
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok"}), 200
+
 @app.route('/status', methods=['GET'])
 def get_status():
-    if not os.path.exists(DATASET_DIR):
-        return jsonify({"status": "Dataset directory not found."}), 503
-        
-    if is_loading_model:
-        model_status = "Loading (starting up...)"
-    elif custom_model is not None:
-        model_status = "Loaded"
-    else:
-        model_status = "Not Trained"
-    
-    # Get all subdirectories in dataset
-    classes = [d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))]
+    classes = []
+    if os.path.isdir(DATASET_DIR):
+        classes = [d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))]
     return jsonify({
-        "status": "Running", 
+        "status": "Running",
         "classes": classes,
-        "model_status": model_status,
+        "model_status": "Loaded" if custom_model is not None else "Not Ready",
         "trained_classes": class_names,
-        "is_training": is_training
+        "is_training": is_training,
+        "model_error": model_load_error,
     })
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    global custom_model
-    
-    # Lazy load the model on the first request
-    if custom_model is None and not is_loading_model:
-        load_custom_model()
-        
-    if is_loading_model:
-        return jsonify({"error": "Service is warming up and loading the ML model. This takes about 45 seconds. Please try again."}), 503
-
     if custom_model is None:
-        return jsonify({"error": f"Failed to load custom model. Detail: {model_load_error}"}), 500
+        msg = "Model is still loading, please wait." if _model_lock.locked() else model_load_error
+        return jsonify({"error": msg}), 503
 
     if 'image' not in request.files:
-        return jsonify({"error": "No image part in the request"}), 400
-        
+        return jsonify({"error": "No image in request."}), 400
+
     file = request.files['image']
-    if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
-
-    if custom_model is None:
-        return jsonify({"error": "Custom model is not trained yet. Please run train_model.py."}), 500
-
+    temp_path = os.path.join(BASE_DIR, "temp_incoming_face.jpg")
     try:
-        # Save the uploaded file temporarily
-        temp_filename = os.path.join(BASE_DIR, "temp_incoming_face.jpg")
-        file.save(temp_filename)
-
-        # Read the image with OpenCV
-        img = cv2.imread(temp_filename)
+        file.save(temp_path)
+        img = cv2.imread(temp_path)
         if img is None:
             return jsonify({"error": "Invalid image file."}), 400
-            
-        # Detect faces using DNN detector (falls back to Haar if unavailable)
+
         faces = detect_faces_dnn(img)
-        
         if len(faces) == 0:
-            if os.path.exists(temp_filename): os.remove(temp_filename)
             return jsonify({"error": "No face detected in the image."}), 404
-            
-        # If multiple faces, pick the largest one assuming it's the target
-        faces = sorted(faces, key=lambda f: f[2]*f[3], reverse=True)
+
+        faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
         x, y, w, h = faces[0]
-        
         margin = int(w * 0.2)
         x1 = max(0, x - margin)
         y1 = max(0, y - margin)
         x2 = min(img.shape[1], x + w + margin)
         y2 = min(img.shape[0], y + h + margin)
 
-        # Crop and preprocess face for MobileNetV2
         face_img = img[y1:y2, x1:x2]
         face_img = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
         face_img = cv2.resize(face_img, (IMG_SIZE, IMG_SIZE))
 
-        # Expand dims and apply MobileNetV2 preprocessing (scale to [-1, 1])
-        # Done here instead of inside the model to avoid TrueDivide serialization errors
+        # MobileNetV2 preprocessing: scale pixels to [-1, 1]
         input_data = np.expand_dims(face_img, axis=0).astype(np.float32)
         input_data = (input_data / 127.5) - 1.0
-        
-        # Make a prediction with our custom CNN model!
-        predictions = custom_model.predict(input_data)
-        best_match_idx = np.argmax(predictions[0])
-        confidence = float(predictions[0][best_match_idx])
-        predicted_class_name = class_names[best_match_idx]
-        
-        if os.path.exists(temp_filename):
-            os.remove(temp_filename)
-            
-        # Threshold for recognition — 85% to avoid false positives with softmax
+
+        predictions = custom_model.predict(input_data, verbose=0)
+        best_idx    = np.argmax(predictions[0])
+        confidence  = float(predictions[0][best_idx])
+        name        = class_names[best_idx]
+
         if confidence < CONFIDENCE_THRESHOLD:
             return jsonify({
-                "error": "No confident match found. Face unrecognized.",
+                "error": "Face not recognized with sufficient confidence.",
                 "confidence": confidence
             }), 404
 
         return jsonify({
-            "match": predicted_class_name,
+            "match": name,
             "confidence": confidence,
-            # We add a fake distance just to keep frontend compatibility if it expects distance
-            "distance": 1.0 - confidence 
+            "distance": 1.0 - confidence
         })
 
     except Exception as e:
-        print(f"Error during prediction: {str(e)}")
-        if os.path.exists(os.path.join(BASE_DIR, "temp_incoming_face.jpg")):
-            os.remove(os.path.join(BASE_DIR, "temp_incoming_face.jpg"))
+        print(f"Prediction error: {e}")
         return jsonify({"error": str(e)}), 500
-
-@app.route('/reload-model', methods=['POST'])
-def reload_model():
-    """Endpoint to reload the custom trained model after running train_model.py"""
-    load_custom_model()
-    if custom_model is not None:
-        return jsonify({"status": "Model reloaded successfully."})
-    return jsonify({"error": "Failed to load custom model. Ensure train_model.py was executed."}), 500
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 @app.route('/register-face', methods=['POST'])
 def register_face():
-    """
-    Accepts: multipart/form-data with:
-      - name: str  (student's name — used as folder name)
-      - images: one or more image files
-    Saves face crops to dataset/<name>/ and returns count saved.
-    """
-    name = request.form.get('name', '').strip()
+    name          = request.form.get('name', '').strip()
     teacher_email = request.form.get('teacherEmail', '').strip()
     if not name:
         return jsonify({'error': 'Student name is required.'}), 400
@@ -335,9 +232,7 @@ def register_face():
     save_dir = os.path.join(DATASET_DIR, name)
     os.makedirs(save_dir, exist_ok=True)
 
-    saved = 0
-    skipped = 0
-
+    saved = skipped = 0
     for file in files:
         try:
             img_array = np.frombuffer(file.read(), np.uint8)
@@ -346,13 +241,11 @@ def register_face():
                 skipped += 1
                 continue
 
-            # Detect face using DNN detector
             faces = detect_faces_dnn(img)
             if len(faces) == 0:
                 skipped += 1
                 continue
 
-            # Crop the largest face with padding
             x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
             margin = int(w * 0.25)
             x1 = max(0, x - margin)
@@ -361,33 +254,39 @@ def register_face():
             y2 = min(img.shape[0], y + h + margin)
             face_crop = img[y1:y2, x1:x2]
 
-            # Save with sequential filename
             existing = len(os.listdir(save_dir))
-            filename = os.path.join(save_dir, f'frame_{existing:04d}.jpg')
-            cv2.imwrite(filename, face_crop)
+            cv2.imwrite(os.path.join(save_dir, f'frame_{existing:04d}.jpg'), face_crop)
             saved += 1
         except Exception as e:
-            print(f'Error processing image: {e}')
+            print(f'Image processing error: {e}')
             skipped += 1
 
-    total_in_folder = len(os.listdir(save_dir))
-    
-    # Trigger background training automatically
-    if not is_training and total_in_folder >= 30:
-        threading.Thread(target=background_train, args=(name, teacher_email)).start()
-        
+    total = len(os.listdir(save_dir))
+    training_started = False
+    if not is_training and total >= 30:
+        threading.Thread(target=background_train, args=(name, teacher_email), daemon=True).start()
+        training_started = True
+
     return jsonify({
         'message': f'Saved {saved} face images for "{name}".',
         'saved': saved,
         'skipped': skipped,
-        'total_in_folder': total_in_folder,
+        'total_in_folder': total,
         'name': name,
-        'is_training': not is_training and total_in_folder >= 30
+        'is_training': training_started,
     })
+
+@app.route('/reload-model', methods=['POST'])
+def reload_model():
+    global custom_model
+    with _model_lock:
+        custom_model = None
+    load_custom_model()
+    if custom_model is not None:
+        return jsonify({"status": "Model reloaded successfully."})
+    return jsonify({"error": model_load_error}), 500
 
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
-    debug_mode = os.environ.get('FLASK_ENV') == 'development'
-    app.run(host='0.0.0.0', port=port, debug=debug_mode)
-
+    app.run(host='0.0.0.0', port=port, debug=False)

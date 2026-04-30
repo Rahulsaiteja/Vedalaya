@@ -8,9 +8,16 @@
 **/coverage/
 **/*.log
 
-# Old model files (Keras 3 format — not deployable on Render)
-ml_backend/custom_face_model.h5
-ml_backend/custom_face_model.keras
+# Model files — large binaries, not for git
+ml_backend/*.h5
+ml_backend/*.keras
+
+# Dataset — large image collection, not for git
+ml_backend/dataset/
+
+# DNN detector weights — downloaded at runtime
+ml_backend/deploy.prototxt
+ml_backend/res10_300x300_ssd_iter_140000.caffemodel
 
 # Temp files
 ml_backend/temp_incoming_face.jpg
@@ -19,3 +26,10 @@ ml_backend/temp_incoming_face.jpg
 **/__pycache__/
 **/*.pyc
 **/*.pyo
+
+# Scratch / test files
+backend/scratch*.js
+backend/test*.js
+backend/check_*.js
+backend/error_std.txt
+backend/otp_output.json
