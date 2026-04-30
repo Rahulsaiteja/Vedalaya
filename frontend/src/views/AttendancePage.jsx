@@ -220,11 +220,18 @@ function RegisterStudentTab() {
   const [uploading, setUploading]   = useState(false)
   const [result,    setResult]      = useState(null)
   const [error,     setError]       = useState(null)
+  const [mlStatus,  setMlStatus]    = useState(null)
   const intervalRef = useRef(null)
 
   useEffect(() => {
-    api.get('/attendance/students')
-      .then(r => setStudents(r.data.students || []))
+    Promise.all([
+      api.get('/attendance/students'),
+      api.get('/attendance/ml-status')
+    ])
+      .then(([stuRes, mlRes]) => {
+        setStudents(stuRes.data.students || [])
+        setMlStatus(mlRes.data || null)
+      })
       .catch(() => {})
   }, [])
 
@@ -415,6 +422,80 @@ function RegisterStudentTab() {
       <p className="text-slate-500 text-xs text-center max-w-md">
         Ask the student to face the camera with different angles and expressions during the 6-second capture.
       </p>
+
+      {/* Registration Status Table */}
+      {mlStatus && (
+        <div className="w-full max-w-2xl mt-8 animate-fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div>
+              <h3 className="text-lg font-bold text-slate-100">Student Registration Status</h3>
+              <p className="text-xs text-slate-400">See who is ready for face recognition login.</p>
+            </div>
+            {mlStatus.is_training ? (
+              <span className="flex items-center gap-2 text-xs font-bold text-amber-400 bg-amber-900/30 px-3 py-1.5 rounded-full border border-amber-700/30 animate-pulse">
+                <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                Model is training...
+              </span>
+            ) : (
+              <span className="flex items-center gap-2 text-xs font-bold text-emerald-400 bg-emerald-900/30 px-3 py-1.5 rounded-full border border-emerald-700/30">
+                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                Model Ready
+              </span>
+            )}
+          </div>
+          
+          <div className="rounded-2xl border border-slate-700 overflow-hidden bg-slate-800/50 shadow-lg">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-slate-800 border-b border-slate-700 text-slate-400 text-xs tracking-widest uppercase">
+                <tr>
+                  <th className="px-5 py-3.5 font-semibold">Student</th>
+                  <th className="px-5 py-3.5 font-semibold">Face Model Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700/50">
+                {students.map((s, i) => {
+                  const isTrained = mlStatus.trained_classes?.includes(s.name)
+                  const isCollected = mlStatus.classes?.includes(s.name)
+                  
+                  return (
+                    <tr key={s._id} className="hover:bg-slate-700/30 transition-colors group">
+                      <td className="px-5 py-3">
+                        <div className="font-semibold text-slate-200 group-hover:text-emerald-300 transition-colors">{s.name}</div>
+                        <div className="text-xs text-slate-500">{s.email}</div>
+                      </td>
+                      <td className="px-5 py-3">
+                        {isTrained ? (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-900/40 text-emerald-400 border border-emerald-700/50">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                            Trained
+                          </span>
+                        ) : isCollected ? (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-900/40 text-amber-400 border border-amber-700/50">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                            Data Collected
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-900/40 text-rose-400 border border-rose-700/50">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                            Not Registered
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+                {students.length === 0 && (
+                  <tr>
+                    <td colSpan="2" className="px-5 py-8 text-center text-slate-500 font-medium">
+                      No students found in the database.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -109,22 +109,63 @@ def load_custom_model():
 
 def background_train(name=None, teacher_email=None):
     """
-    On Render free tier we cannot train (not enough RAM).
-    Instead, notify the teacher to retrain locally and re-upload.
-    Face images are saved to Cloudinary for when local training runs.
+    Runs on HF Spaces (16GB RAM) — performs full training:
+      1. Download all face images from Cloudinary
+      2. Run train_model.py
+      3. Upload new model to Cloudinary
+      4. Reload model in memory
+      5. Notify Node backend via webhook
     """
+    global is_training, custom_model
+    is_training = True
     node_url       = os.environ.get('NODE_API_URL', 'http://localhost:5000')
     webhook_secret = os.environ.get('WEBHOOK_SECRET', '')
-    if name and teacher_email:
-        try:
-            http_requests.post(
-                f"{node_url}/api/attendance/notify-training",
-                json={"name": name, "email": teacher_email},
-                headers={"x-webhook-secret": webhook_secret},
-                timeout=10
-            )
-        except Exception as e:
-            print(f"Webhook failed: {e}")
+    try:
+        print("[Train] Syncing dataset from Cloudinary...")
+        storage.download_all_faces(DATASET_DIR)
+
+        print("[Train] Starting train_model.py...")
+        result = subprocess.run(
+            ["python", os.path.join(BASE_DIR, "train_model.py")],
+            cwd=BASE_DIR,
+            check=True,
+            env={**os.environ, "DATA_DIR": DATA_DIR},
+            capture_output=True,
+            text=True
+        )
+        print("[Train] stdout:", result.stdout[-3000:] if result.stdout else "(none)")
+
+        if os.path.exists(MODEL_PATH) and os.path.exists(CLASS_NAMES_PATH):
+            with open(CLASS_NAMES_PATH, "r") as f:
+                trained_classes = json.load(f)
+            storage.upload_model(MODEL_PATH, trained_classes)
+            custom_model = None
+            load_custom_model()
+            print("[Train] Complete — model reloaded.")
+            train_status = "complete"
+        else:
+            print("[Train] ERROR: Model file missing after training.")
+            train_status = "failed"
+
+        # Notify Node backend
+        if name and teacher_email:
+            try:
+                http_requests.post(
+                    f"{node_url}/api/attendance/notify-training",
+                    json={"name": name, "email": teacher_email, "status": train_status},
+                    headers={"x-webhook-secret": webhook_secret},
+                    timeout=10
+                )
+            except Exception as e:
+                print(f"[Train] Webhook failed: {e}")
+
+    except subprocess.CalledProcessError as e:
+        print(f"[Train] Subprocess error: {e}")
+        print(f"[Train] stderr: {e.stderr[-2000:] if e.stderr else ''}")
+    except Exception as e:
+        print(f"[Train] Unexpected error: {e}")
+    finally:
+        is_training = False
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 load_dnn_detector()
@@ -321,8 +362,8 @@ def register_face():
     total = start_index + saved
     training_started = False
     if not is_training and total >= 30:
-        threading.Thread(target=background_train, args=(name, teacher_email), daemon=True).start()
         training_started = True
+        threading.Thread(target=background_train, args=(name, teacher_email), daemon=True).start()
 
     return jsonify({
         'message': f'Saved {saved} face images for "{name}".',

@@ -114,7 +114,7 @@ router.post('/mark', requireAuth, upload.single('image'), async (req, res) => {
 // ── Student: get own attendance history ───────────────────────────────
 router.get('/my', requireAuth, async (req, res) => {
   try {
-    const records = await Attendance.find({ user: req.user.id })
+    const records = await Attendance.find({ user: req.user.sub })
       .populate('classGroup', 'name section')
       .sort({ date: -1 })
       .limit(100);
@@ -127,7 +127,7 @@ router.get('/my', requireAuth, async (req, res) => {
 // ── Student: get own attendance stats ─────────────────────────────────
 router.get('/my/stats', requireAuth, async (req, res) => {
   try {
-    const records = await Attendance.find({ user: req.user.id });
+    const records = await Attendance.find({ user: req.user.sub });
     const total   = records.length;
     const present = records.filter(r => r.status === 'Present').length;
     res.json({ total, present, absent: total - present, percentage: total ? Math.round(present / total * 100) : 0 });
@@ -249,6 +249,16 @@ router.post('/register-face', requireAuth, requireRole('teacher'), upload.fields
   } catch (err) {
     const status = err.response?.status || 500;
     return res.status(status).json({ error: err.response?.data?.error || 'ML service error.' });
+  }
+});
+
+// ── Teacher: get ML service status ─────────────────────────────────────
+router.get('/ml-status', requireAuth, requireRole('teacher'), async (req, res) => {
+  try {
+    const mlRes = await axios.get(`${ML_URL()}/status`);
+    res.json(mlRes.data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch ML status', details: error.message });
   }
 });
 

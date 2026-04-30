@@ -1,0 +1,6 @@
+*.h5
+*.keras
+*.caffemodel
+__pycache__
+dataset/
+temp_incoming_face.jpg
