@@ -3,7 +3,10 @@ import { env } from './env.js';
 
 function createTransporter() {
   return nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false, // STARTTLS
+    family: 4,     // Force IPv4 — prevents ENETUNREACH on Render
     auth: {
       type: 'OAuth2',
       user: env.GMAIL_USER,
