@@ -59,6 +59,7 @@ export function TeacherLecturesPage() {
         fd.append('timestamp', timestamp)
         fd.append('signature', signature)
         fd.append('folder', folder)
+        fd.append('resource_type', 'auto')
 
         const cloudRes = await axios.post(
           `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,

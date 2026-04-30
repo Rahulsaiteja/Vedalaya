@@ -23,7 +23,7 @@ const router = express.Router();
 router.post('/sign-upload', requireAuth, requireRole('teacher'), (req, res) => {
   const timestamp = Math.round(Date.now() / 1000);
   const folder = 'vedalaya_lectures';
-  const paramsToSign = { folder, timestamp };
+  const paramsToSign = { folder, resource_type: 'auto', timestamp };
   const signature = cloudinary.utils.api_sign_request(paramsToSign, env.CLOUDINARY_API_SECRET);
   res.json({
     signature,
