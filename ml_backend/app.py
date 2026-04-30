@@ -161,7 +161,7 @@ def startup_sequence():
     1. Try to download trained model from Cloudinary
     2. If no model but faces exist on Cloudinary → sync faces + auto-train
     """
-    global is_training
+    global is_training, custom_model
 
     # Step 1: try to load existing model from Cloudinary
     load_custom_model()
@@ -187,9 +187,7 @@ def startup_sequence():
                     with open(CLASS_NAMES_PATH, "r") as f:
                         trained_classes = json.load(f)
                     storage.upload_model(MODEL_PATH, trained_classes)
-                    # Reset so load_custom_model reloads fresh
-                    global custom_model
-                    custom_model = None
+                    custom_model = None  # reset so load_custom_model reloads fresh
                     load_custom_model()
                 else:
                     print("ERROR: Training completed but model file not found!")
