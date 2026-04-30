@@ -6,7 +6,7 @@ import json
 import numpy as np
 import threading
 import subprocess
-import requests
+import requests as http_requests
 
 # Prevent GPU memory allocation and minimize TF logs
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
@@ -17,29 +17,26 @@ import tensorflow as tf
 tf.config.threading.set_inter_op_parallelism_threads(1)
 tf.config.threading.set_intra_op_parallelism_threads(1)
 
+import storage  # Cloudinary persistence layer
+
 app = Flask(__name__)
 CORS(app)
 
-BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
-
-# DATA_DIR points to Render persistent disk in production (/app/data)
-# Falls back to the app directory for local development
-DATA_DIR       = os.environ.get('DATA_DIR', BASE_DIR)
-
-DATASET_DIR    = os.path.join(DATA_DIR, "dataset")
-MODEL_PATH     = os.path.join(DATA_DIR, "custom_face_model_v2.h5")
+BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR         = os.environ.get('DATA_DIR', BASE_DIR)
+DATASET_DIR      = os.path.join(DATA_DIR, "dataset")
+MODEL_PATH       = os.path.join(DATA_DIR, "custom_face_model_v2.h5")
 CLASS_NAMES_PATH = os.path.join(DATA_DIR, "class_names.json")
-IMG_SIZE       = 160
+IMG_SIZE         = 160
 CONFIDENCE_THRESHOLD = 0.85
 
-# Ensure persistent data dirs exist on startup
 os.makedirs(DATASET_DIR, exist_ok=True)
 
 # ── Model state ───────────────────────────────────────────────────────────────
 custom_model     = None
 class_names      = []
 model_load_error = "Model not loaded yet."
-_model_lock      = threading.Lock()   # prevents race condition on concurrent requests
+_model_lock      = threading.Lock()
 is_training      = False
 
 # ── DNN Face Detector ─────────────────────────────────────────────────────────
@@ -85,10 +82,15 @@ def detect_faces_dnn(img, conf_threshold=0.5):
 def load_custom_model():
     global custom_model, class_names, model_load_error
     with _model_lock:
-        # Double-check inside lock to avoid loading twice
         if custom_model is not None:
             return
         print("Loading ML model...")
+
+        # Try to download from Cloudinary if not on disk
+        if not os.path.exists(MODEL_PATH) or not os.path.exists(CLASS_NAMES_PATH):
+            print("Model not on disk — downloading from Cloudinary...")
+            storage.download_model(MODEL_PATH, CLASS_NAMES_PATH)
+
         try:
             if os.path.exists(MODEL_PATH) and os.path.exists(CLASS_NAMES_PATH):
                 custom_model = tf.keras.models.load_model(MODEL_PATH)
@@ -98,8 +100,7 @@ def load_custom_model():
                 print(f"Model loaded. Classes: {class_names}")
             else:
                 model_load_error = (
-                    f"Model file not found at {MODEL_PATH}. "
-                    "Register students to trigger training."
+                    "No trained model found. Register students to trigger training."
                 )
                 print(model_load_error)
         except Exception as e:
@@ -111,22 +112,34 @@ def background_train(name=None, teacher_email=None):
     try:
         is_training = True
         print(f"Background training started for: {name}")
+
+        # Download all face images from Cloudinary before training
+        print("Syncing dataset from Cloudinary...")
+        storage.download_all_faces(DATASET_DIR)
+
         subprocess.run(
             ["python", os.path.join(BASE_DIR, "train_model.py")],
-            cwd=BASE_DIR, check=True
+            cwd=BASE_DIR, check=True,
+            env={**os.environ, "DATA_DIR": DATA_DIR}
         )
-        print("Training done. Reloading model...")
-        # Reset so load_custom_model reloads fresh
+        print("Training done. Uploading model to Cloudinary...")
+
+        # Upload trained model to Cloudinary for persistence
+        with open(CLASS_NAMES_PATH, "r") as f:
+            trained_classes = json.load(f)
+        storage.upload_model(MODEL_PATH, trained_classes)
+
+        # Reload model in memory
         with _model_lock:
             custom_model = None
         load_custom_model()
 
         # Notify Node backend
-        node_url      = os.environ.get('NODE_API_URL', 'http://localhost:5000')
+        node_url       = os.environ.get('NODE_API_URL', 'http://localhost:5000')
         webhook_secret = os.environ.get('WEBHOOK_SECRET', '')
         if name and teacher_email:
             try:
-                requests.post(
+                http_requests.post(
                     f"{node_url}/api/attendance/notify-training",
                     json={"name": name, "email": teacher_email},
                     headers={"x-webhook-secret": webhook_secret},
@@ -139,10 +152,9 @@ def background_train(name=None, teacher_email=None):
     finally:
         is_training = False
 
-# ── Load detector at startup (files pre-downloaded in Docker build) ───────────
+# ── Startup ───────────────────────────────────────────────────────────────────
 load_dnn_detector()
-
-# ── Load model at startup in background so health check passes immediately ────
+# Load model in background so health check passes immediately
 threading.Thread(target=load_custom_model, daemon=True).start()
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -163,6 +175,7 @@ def get_status():
         "trained_classes": class_names,
         "is_training": is_training,
         "model_error": model_load_error,
+        "cloudinary": storage.is_configured(),
     })
 
 @app.route('/predict', methods=['POST'])
@@ -240,8 +253,13 @@ def register_face():
     save_dir = os.path.join(DATASET_DIR, name)
     os.makedirs(save_dir, exist_ok=True)
 
+    # Get current count from Cloudinary (source of truth) + local
+    cloudinary_count = storage.count_faces_for_student(name)
+    local_count      = len([f for f in os.listdir(save_dir) if f.endswith('.jpg')])
+    start_index      = max(cloudinary_count, local_count)
+
     saved = skipped = 0
-    for file in files:
+    for i, file in enumerate(files):
         try:
             img_array = np.frombuffer(file.read(), np.uint8)
             img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
@@ -262,14 +280,20 @@ def register_face():
             y2 = min(img.shape[0], y + h + margin)
             face_crop = img[y1:y2, x1:x2]
 
-            existing = len(os.listdir(save_dir))
-            cv2.imwrite(os.path.join(save_dir, f'frame_{existing:04d}.jpg'), face_crop)
+            # Save locally
+            local_path = os.path.join(save_dir, f'frame_{start_index + saved:04d}.jpg')
+            cv2.imwrite(local_path, face_crop)
+
+            # Upload to Cloudinary for persistence
+            with open(local_path, 'rb') as f_img:
+                storage.upload_face_image(f_img.read(), name, start_index + saved)
+
             saved += 1
         except Exception as e:
             print(f'Image processing error: {e}')
             skipped += 1
 
-    total = len(os.listdir(save_dir))
+    total = start_index + saved
     training_started = False
     if not is_training and total >= 30:
         threading.Thread(target=background_train, args=(name, teacher_email), daemon=True).start()
