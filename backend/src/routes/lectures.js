@@ -1,6 +1,7 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 
@@ -10,7 +11,28 @@ import { Lecture } from '../models/Lecture.js';
 import { env } from '../utils/env.js';
 import { v2 as cloudinary } from 'cloudinary';
 
+cloudinary.config({
+  cloud_name: env.CLOUDINARY_CLOUD_NAME,
+  api_key: env.CLOUDINARY_API_KEY,
+  api_secret: env.CLOUDINARY_API_SECRET,
+});
+
 const router = express.Router();
+
+// Generate a signed upload signature so the frontend can upload directly to Cloudinary
+router.post('/sign-upload', requireAuth, requireRole('teacher'), (req, res) => {
+  const timestamp = Math.round(Date.now() / 1000);
+  const folder = 'vedalaya_lectures';
+  const paramsToSign = { folder, timestamp };
+  const signature = cloudinary.utils.api_sign_request(paramsToSign, env.CLOUDINARY_API_SECRET);
+  res.json({
+    signature,
+    timestamp,
+    folder,
+    cloudName: env.CLOUDINARY_CLOUD_NAME,
+    apiKey: env.CLOUDINARY_API_KEY,
+  });
+});
 
 function getYoutubeVideoId(url) {
   try {
@@ -63,28 +85,43 @@ router.post(
       description: z.string().optional().default(''),
       category: z.string().optional().default('General'),
       youtubeUrl: z.string().optional().default(''),
+      // Direct Cloudinary upload fields (when frontend uploads directly)
+      cloudinaryUrl: z.string().optional().default(''),
+      cloudinaryPublicId: z.string().optional().default(''),
+      originalName: z.string().optional().default(''),
+      mimeType: z.string().optional().default(''),
+      fileSize: z.coerce.number().optional().default(0),
     });
 
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: { message: parsed.error.message } });
+
     const youtubeUrl = parsed.data.youtubeUrl?.trim() || '';
     const youtubeVideoId = youtubeUrl ? getYoutubeVideoId(youtubeUrl) : null;
     const isYoutube = Boolean(youtubeVideoId);
-    if (!isYoutube && !req.file) {
-      return res.status(400).json({ error: { message: 'Provide either a file or a valid YouTube URL' } });
+
+    // Direct upload path — Cloudinary URL provided by frontend
+    const isDirectUpload = Boolean(parsed.data.cloudinaryUrl);
+
+    if (!isYoutube && !req.file && !isDirectUpload) {
+      return res.status(400).json({ error: { message: 'Provide either a file, a Cloudinary upload, or a valid YouTube URL' } });
     }
 
-    let cloudinaryUrl = '';
-    let cloudinaryPublicId = '';
+    let cloudinaryUrl = parsed.data.cloudinaryUrl || '';
+    let cloudinaryPublicId = parsed.data.cloudinaryPublicId || '';
+    let fileName = parsed.data.originalName || '';
+    let fileMime = parsed.data.mimeType || '';
+    let fileSize = parsed.data.fileSize || 0;
 
-    if (!isYoutube && req.file) {
+    // Legacy path — file uploaded through Render (small files only)
+    if (!isYoutube && req.file && !isDirectUpload) {
       const absolutePath = path.resolve(process.cwd(), env.UPLOAD_DIR, req.file.filename);
       try {
         const result = await new Promise((resolve, reject) => {
           cloudinary.uploader.upload_large(absolutePath, {
             resource_type: 'auto',
             folder: 'vedalaya_lectures',
-            chunk_size: 6000000 // 6MB chunks to bypass 100MB limit safely
+            chunk_size: 6000000,
           }, (error, result) => {
             if (error) reject(error);
             else resolve(result);
@@ -92,13 +129,14 @@ router.post(
         });
         cloudinaryUrl = result.secure_url;
         cloudinaryPublicId = result.public_id;
+        fileName = req.file.originalname;
+        fileMime = req.file.mimetype;
+        fileSize = req.file.size;
       } catch (err) {
         console.error('Cloudinary upload error:', err);
         return res.status(500).json({ error: { message: 'Cloudinary upload failed: ' + (err.message || 'Unknown error') } });
       } finally {
-        if (fs.existsSync(absolutePath)) {
-          fs.unlinkSync(absolutePath);
-        }
+        if (fs.existsSync(absolutePath)) fs.unlinkSync(absolutePath);
       }
     }
 
@@ -109,52 +147,24 @@ router.post(
       createdBy: req.user.sub,
       status: 'draft',
       sourceType: isYoutube ? 'youtube' : 'file',
-      mediaType: isYoutube ? 'video' : inferFileMediaType(req.file?.mimetype || ''),
+      mediaType: isYoutube ? 'video' : inferFileMediaType(fileMime),
       youtubeUrl: isYoutube ? youtubeUrl : '',
       youtubeVideoId: isYoutube ? youtubeVideoId : '',
       file: {
-        storedName: req.file?.filename || '',
-        originalName: req.file?.originalname || '',
-        mimeType: req.file?.mimetype || '',
-        size: req.file?.size || 0,
-        cloudinaryUrl: cloudinaryUrl,
-        cloudinaryPublicId: cloudinaryPublicId,
+        storedName: fileName,
+        originalName: fileName,
+        mimeType: fileMime,
+        size: fileSize,
+        cloudinaryUrl,
+        cloudinaryPublicId,
       },
       variants: isYoutube ? [] : [
-        {
-          quality: 'original',
-          storedName: req.file?.filename || '',
-          mimeType: req.file?.mimetype || '',
-          size: req.file?.size || 0,
-          cloudinaryUrl: cloudinaryUrl,
-          cloudinaryPublicId: cloudinaryPublicId,
-        },
-        {
-          quality: '720p',
-          storedName: req.file?.filename || '',
-          mimeType: req.file?.mimetype || '',
-          size: req.file?.size || 0,
-          cloudinaryUrl: cloudinaryUrl,
-          cloudinaryPublicId: cloudinaryPublicId,
-        },
-        {
-          quality: '480p',
-          storedName: req.file?.filename || '',
-          mimeType: req.file?.mimetype || '',
-          size: req.file?.size || 0,
-          cloudinaryUrl: cloudinaryUrl,
-          cloudinaryPublicId: cloudinaryPublicId,
-        },
-        {
-          quality: '360p',
-          storedName: req.file?.filename || '',
-          mimeType: req.file?.mimetype || '',
-          size: req.file?.size || 0,
-          cloudinaryUrl: cloudinaryUrl,
-          cloudinaryPublicId: cloudinaryPublicId,
-        }
+        { quality: 'original', storedName: fileName, mimeType: fileMime, size: fileSize, cloudinaryUrl, cloudinaryPublicId },
+        { quality: '720p',     storedName: fileName, mimeType: fileMime, size: fileSize, cloudinaryUrl, cloudinaryPublicId },
+        { quality: '480p',     storedName: fileName, mimeType: fileMime, size: fileSize, cloudinaryUrl, cloudinaryPublicId },
+        { quality: '360p',     storedName: fileName, mimeType: fileMime, size: fileSize, cloudinaryUrl, cloudinaryPublicId },
       ],
-      processingStatus: 'completed' // Cloudinary handles transcoding automatically
+      processingStatus: 'completed',
     });
 
     res.status(201).json({ lecture });

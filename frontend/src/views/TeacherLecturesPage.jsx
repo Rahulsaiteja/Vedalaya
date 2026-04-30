@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
+import axios from 'axios'
 import { api } from '../utils/api.js'
 import { Card, PrimaryButton, TextInput } from '../ui/form.jsx'
 import { useLanguage } from '../state/LanguageContext.jsx'
@@ -32,27 +33,76 @@ export function TeacherLecturesPage() {
 
   const canUpload = useMemo(() => title.trim() && (file || youtubeUrl.trim()), [title, file, youtubeUrl])
 
+  const [uploadProgress, setUploadProgress] = useState(0)
+
   async function uploadLecture() {
     if (!canUpload) return
     setBusy(true)
     setError(null)
+    setUploadProgress(0)
     try {
-      const fd = new FormData()
-      fd.set('title', title)
-      fd.set('description', description)
-      if (category.trim()) fd.set('category', category.trim())
-      if (youtubeUrl.trim()) fd.set('youtubeUrl', youtubeUrl.trim())
-      if (file) fd.set('file', file)
-      await api.post('/lectures', fd)
+      let cloudinaryUrl = ''
+      let cloudinaryPublicId = ''
+      let originalName = ''
+      let mimeType = ''
+      let fileSize = 0
+
+      if (file) {
+        // Step 1: get signed upload params from backend
+        const sigRes = await api.post('/lectures/sign-upload')
+        const { signature, timestamp, folder, cloudName, apiKey } = sigRes.data
+
+        // Step 2: upload directly to Cloudinary (bypasses Render timeout)
+        const fd = new FormData()
+        fd.append('file', file)
+        fd.append('api_key', apiKey)
+        fd.append('timestamp', timestamp)
+        fd.append('signature', signature)
+        fd.append('folder', folder)
+
+        const cloudRes = await axios.post(
+          `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
+          fd,
+          {
+            onUploadProgress: (e) => {
+              if (e.total) setUploadProgress(Math.round((e.loaded / e.total) * 100))
+            },
+            timeout: 0, // no timeout for large files
+          }
+        )
+
+        cloudinaryUrl = cloudRes.data.secure_url
+        cloudinaryPublicId = cloudRes.data.public_id
+        originalName = file.name
+        mimeType = file.type
+        fileSize = file.size
+      }
+
+      // Step 3: save lecture metadata to backend
+      const body = new FormData()
+      body.set('title', title)
+      body.set('description', description)
+      if (category.trim()) body.set('category', category.trim())
+      if (youtubeUrl.trim()) body.set('youtubeUrl', youtubeUrl.trim())
+      if (cloudinaryUrl) {
+        body.set('cloudinaryUrl', cloudinaryUrl)
+        body.set('cloudinaryPublicId', cloudinaryPublicId)
+        body.set('originalName', originalName)
+        body.set('mimeType', mimeType)
+        body.set('fileSize', fileSize)
+      }
+      await api.post('/lectures', body)
+
       setTitle('')
       setDescription('')
       setCategory('')
       setYoutubeUrl('')
       setFile(null)
+      setUploadProgress(0)
       await load()
     } catch (err) {
-      console.error('Upload Error:', err);
-      const msg = err?.response?.data?.error?.message || err?.message || 'Upload failed';
+      console.error('Upload Error:', err)
+      const msg = err?.response?.data?.error?.message || err?.message || 'Upload failed'
       setError(msg)
     } finally {
       setBusy(false)
@@ -272,8 +322,16 @@ export function TeacherLecturesPage() {
           </label>
           <div className="flex items-center gap-4 pt-2">
             <PrimaryButton onClick={uploadLecture} disabled={!canUpload || busy}>
-              {busy ? 'UPLOADING…' : 'UPLOAD LECTURE'}
+              {busy ? (file && uploadProgress < 100 ? `UPLOADING… ${uploadProgress}%` : 'SAVING…') : 'UPLOAD LECTURE'}
             </PrimaryButton>
+            {busy && file && uploadProgress > 0 && uploadProgress < 100 && (
+              <div className="flex-1 bg-slate-200 rounded-full h-2">
+                <div
+                  className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            )}
           </div>
         </div>
       </Card>
