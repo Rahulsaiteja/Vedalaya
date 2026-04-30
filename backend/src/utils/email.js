@@ -1,27 +1,53 @@
-import nodemailer from 'nodemailer';
+import { google } from 'googleapis';
 import { env } from './env.js';
 
-function createTransporter() {
-  return nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false, // STARTTLS
-    family: 4,     // Force IPv4 — prevents ENETUNREACH on Render
-    auth: {
-      type: 'OAuth2',
-      user: env.GMAIL_USER,
-      clientId: env.GMAIL_CLIENT_ID,
-      clientSecret: env.GMAIL_CLIENT_SECRET,
-      refreshToken: env.GMAIL_REFRESH_TOKEN,
-    },
-  });
+// OAuth2 client using Gmail REST API (HTTPS port 443 — works on Render)
+function getOAuth2Client() {
+  const oauth2Client = new google.auth.OAuth2(
+    env.GMAIL_CLIENT_ID,
+    env.GMAIL_CLIENT_SECRET,
+    'https://developers.google.com/oauthplayground',
+  );
+  oauth2Client.setCredentials({ refresh_token: env.GMAIL_REFRESH_TOKEN });
+  return oauth2Client;
+}
+
+function makeRawEmail({ to, subject, text, html }) {
+  const from = `"Vedalaya Auth" <${env.GMAIL_USER}>`;
+  const boundary = 'boundary_vedalaya_' + Date.now();
+  const lines = [
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    '',
+    text,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/html; charset=UTF-8',
+    '',
+    html,
+    '',
+    `--${boundary}--`,
+  ];
+  const raw = lines.join('\r\n');
+  return Buffer.from(raw).toString('base64url');
+}
+
+async function sendEmail({ to, subject, text, html }) {
+  const auth = getOAuth2Client();
+  const gmail = google.gmail({ version: 'v1', auth });
+  const raw = makeRawEmail({ to, subject, text, html });
+  await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
 }
 
 export async function sendOtpEmail(to, otp) {
   try {
-    const transporter = createTransporter();
-    await transporter.sendMail({
-      from: `"Vedalaya Auth" <${env.GMAIL_USER}>`,
+    await sendEmail({
       to,
       subject: 'Your OTP for Registration',
       text: `Your OTP is: ${otp}. It will expire in 10 minutes.`,
@@ -36,9 +62,7 @@ export async function sendOtpEmail(to, otp) {
 
 export async function sendTrainingCompleteEmail(to, studentName) {
   try {
-    const transporter = createTransporter();
-    await transporter.sendMail({
-      from: `"Vedalaya Auth" <${env.GMAIL_USER}>`,
+    await sendEmail({
       to,
       subject: `Face Recognition Training Complete: ${studentName}`,
       text: `The face recognition model has finished training for student: ${studentName}. The system is now ready to recognize them.`,
@@ -63,9 +87,7 @@ export async function sendTrainingCompleteEmail(to, studentName) {
 
 export async function sendPasswordResetEmail(to, resetUrl) {
   try {
-    const transporter = createTransporter();
-    await transporter.sendMail({
-      from: `"Vedalaya Auth" <${env.GMAIL_USER}>`,
+    await sendEmail({
       to,
       subject: 'Password Reset Request - Vedalaya',
       text: `You requested a password reset. Click the link below to reset your password:\n\n${resetUrl}\n\nThis link will expire in 1 hour.`,
