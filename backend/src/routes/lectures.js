@@ -23,7 +23,8 @@ const router = express.Router();
 router.post('/sign-upload', requireAuth, requireRole('teacher'), (req, res) => {
   const timestamp = Math.round(Date.now() / 1000);
   const folder = 'vedalaya_lectures';
-  const paramsToSign = { folder, resource_type: 'auto', timestamp };
+  // Only sign folder + timestamp — resource_type is in the URL, not the signature
+  const paramsToSign = { folder, timestamp };
   const signature = cloudinary.utils.api_sign_request(paramsToSign, env.CLOUDINARY_API_SECRET);
   res.json({
     signature,
