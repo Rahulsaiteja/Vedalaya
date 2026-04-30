@@ -25,10 +25,10 @@ CORS(app)
 BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR         = os.environ.get('DATA_DIR', BASE_DIR)
 DATASET_DIR      = os.path.join(DATA_DIR, "dataset")
-MODEL_PATH       = os.path.join(DATA_DIR, "custom_face_model_v2.h5")
+MODEL_PATH       = os.path.join(DATA_DIR, "custom_face_model_v2.keras")
 CLASS_NAMES_PATH = os.path.join(DATA_DIR, "class_names.json")
 IMG_SIZE         = 160
-CONFIDENCE_THRESHOLD = 0.40
+CONFIDENCE_THRESHOLD = 0.85
 
 os.makedirs(DATASET_DIR, exist_ok=True)
 
@@ -288,14 +288,11 @@ def predict():
 
         if confidence < CONFIDENCE_THRESHOLD:
             return jsonify({
-                "error": "Face not recognized with sufficient confidence.",
-                "confidence": confidence
+                "error": "Face not recognized."
             }), 404
 
         return jsonify({
-            "match": name,
-            "confidence": confidence,
-            "distance": 1.0 - confidence
+            "match": name
         })
 
     except Exception as e:
@@ -361,7 +358,7 @@ def register_face():
 
     total = start_index + saved
     training_started = False
-    if not is_training and total >= 30:
+    if not is_training and total >= 100:
         training_started = True
         threading.Thread(target=background_train, args=(name, teacher_email), daemon=True).start()
 
@@ -414,8 +411,14 @@ def retrain():
                 print("Retrain complete. Model loaded.")
             else:
                 print("ERROR: Retrain finished but model file missing.")
+                model_load_error = f"Model missing! STDOUT: {result.stdout[-1000:] if result.stdout else 'None'}"
+        except subprocess.CalledProcessError as e:
+            err_msg = f"Training crashed! Exit {e.returncode}. STDERR: {e.stderr[-1000:] if e.stderr else 'None'} STDOUT: {e.stdout[-1000:] if e.stdout else 'None'}"
+            print(err_msg)
+            model_load_error = err_msg
         except Exception as e:
             print(f"Retrain error: {e}")
+            model_load_error = f"Retrain error: {e}"
         finally:
             is_training = False
 

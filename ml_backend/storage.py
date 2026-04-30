@@ -136,19 +136,26 @@ def count_faces_for_student(student_name):
 # ── Model storage ─────────────────────────────────────────────────────────────
 
 def upload_model(model_path, class_names):
-    """Upload trained model .h5 and class_names list to Cloudinary."""
+    """Upload trained model .keras (chunked) and class_names list to Cloudinary."""
     if not is_configured():
         print("Cloudinary not configured — model not uploaded.")
         return False
     try:
-        # Upload model file as raw
-        cloudinary.uploader.upload(
-            model_path,
-            public_id=MODEL_PUBLIC_ID,
-            resource_type="raw",
-            overwrite=True,
-        )
-        print("Model uploaded to Cloudinary.")
+        # Split model into 9MB chunks to bypass 10MB raw limit
+        CHUNK_SIZE = 9 * 1024 * 1024
+        with open(model_path, "rb") as f:
+            data = f.read()
+        
+        chunks = [data[i:i + CHUNK_SIZE] for i in range(0, len(data), CHUNK_SIZE)]
+        
+        for i, chunk in enumerate(chunks):
+            cloudinary.uploader.upload(
+                chunk,
+                public_id=f"{MODEL_PUBLIC_ID}_part{i}",
+                resource_type="raw",
+                overwrite=True,
+            )
+            print(f"Model part {i} uploaded to Cloudinary.")
 
         # Upload class names as JSON raw file
         class_json = json.dumps(class_names).encode("utf-8")
@@ -167,27 +174,38 @@ def upload_model(model_path, class_names):
 
 def download_model(local_model_path, local_classes_path):
     """
-    Download model .h5 and class_names.json from Cloudinary to local paths.
+    Download model .keras (recombining chunks) and class_names.json from Cloudinary to local paths.
     Returns True if both files were downloaded successfully.
     """
     if not is_configured():
         print("Cloudinary not configured — skipping model download.")
         return False
     try:
-        # Get the raw file URLs
-        model_info = cloudinary.api.resource(MODEL_PUBLIC_ID, resource_type="raw")
-        classes_info = cloudinary.api.resource(CLASSES_PUBLIC_ID, resource_type="raw")
-
-        # Download model
-        resp = requests.get(model_info["secure_url"], timeout=120)
-        if resp.status_code != 200:
-            print(f"Failed to download model: HTTP {resp.status_code}")
+        # Recombine model chunks
+        model_data = bytearray()
+        part = 0
+        while True:
+            try:
+                part_info = cloudinary.api.resource(f"{MODEL_PUBLIC_ID}_part{part}", resource_type="raw")
+                resp = requests.get(part_info["secure_url"], timeout=120)
+                if resp.status_code == 200:
+                    model_data.extend(resp.content)
+                    part += 1
+                else:
+                    break
+            except cloudinary.exceptions.NotFound:
+                break
+        
+        if part == 0:
+            print("No model parts found on Cloudinary yet — needs training first.")
             return False
+
         with open(local_model_path, "wb") as f:
-            f.write(resp.content)
-        print(f"Model downloaded from Cloudinary → {local_model_path}")
+            f.write(model_data)
+        print(f"Model downloaded (recombined {part} parts) → {local_model_path}")
 
         # Download class names
+        classes_info = cloudinary.api.resource(CLASSES_PUBLIC_ID, resource_type="raw")
         resp = requests.get(classes_info["secure_url"], timeout=30)
         if resp.status_code != 200:
             print(f"Failed to download class names: HTTP {resp.status_code}")
@@ -198,7 +216,7 @@ def download_model(local_model_path, local_classes_path):
 
         return True
     except cloudinary.exceptions.NotFound:
-        print("No model found on Cloudinary yet — needs training first.")
+        print("Classes file not found on Cloudinary.")
         return False
     except Exception as e:
         print(f"Cloudinary download_model error: {e}")

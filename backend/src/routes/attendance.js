@@ -87,7 +87,6 @@ router.post('/mark', requireAuth, upload.single('image'), async (req, res) => {
         message: 'Attendance already marked today.',
         alreadyMarked: true,
         user: { name: user.name, email: user.email },
-        confidence: mlResponse.data.confidence,
         classGroup: classGroup ? { _id: classGroup._id, name: classGroup.name, section: classGroup.section } : null,
       });
     }
@@ -101,7 +100,6 @@ router.post('/mark', requireAuth, upload.single('image'), async (req, res) => {
     return res.status(200).json({
       message: 'Attendance marked successfully.',
       user: { name: user.name, email: user.email },
-      confidence: mlResponse.data.confidence,
       recordId: record._id,
       classGroup: classGroup ? { _id: classGroup._id, name: classGroup.name, section: classGroup.section } : null,
     });

@@ -7,9 +7,7 @@ let transporter;
 async function createTransporter() {
   if (transporter) return transporter;
   transporter = nodemailer.createTransport({
-    host: env.SMTP_HOST,
-    port: env.SMTP_PORT,
-    secure: env.SMTP_PORT === 465, // true for 465, false for other ports
+    service: 'gmail',
     auth: {
       user: env.SMTP_USER,
       pass: env.SMTP_PASS,
