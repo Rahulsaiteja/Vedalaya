@@ -195,7 +195,6 @@ function MarkAttendanceTab() {
             <h3 className="text-xl font-bold">{result.message}</h3>
             <div className="flex gap-6 text-sm bg-black/20 px-6 py-2 rounded-full">
               <span>Student: <strong className="text-white">{result.user?.name}</strong></span>
-              <span>Confidence: <strong className="text-white">{((result.confidence || 0) * 100).toFixed(1)}%</strong></span>
             </div>
           </div>
         </div>
