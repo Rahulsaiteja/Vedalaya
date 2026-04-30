@@ -5,7 +5,9 @@ import { z } from 'zod';
 import { User } from '../models/User.js';
 import { signAccessToken } from '../utils/tokens.js';
 import { requireAuth } from '../middleware/auth.js';
-import { sendOtpEmail } from '../utils/email.js';
+import { sendOtpEmail, sendPasswordResetEmail } from '../utils/email.js';
+import { env } from '../utils/env.js';
+import crypto from 'crypto';
 
 const router = express.Router();
 
@@ -155,6 +157,65 @@ router.post('/login', async (req, res, next) => {
 
     const token = signAccessToken(user);
     return res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: { message: err.message } });
+    return next(err);
+  }
+});
+
+const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+});
+
+router.post('/forgot-password', async (req, res, next) => {
+  try {
+    const { email } = forgotPasswordSchema.parse(req.body);
+    const user = await User.findOne({ email });
+
+    // Do not leak if user exists or not for security, but here we can just say "If an account exists, an email was sent"
+    if (!user) {
+      return res.json({ message: 'If an account exists with that email, a reset link has been sent.' });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    user.resetPasswordToken = resetToken;
+    user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    await user.save();
+
+    const resetUrl = `${env.CLIENT_ORIGIN}/reset-password?token=${resetToken}`;
+    await sendPasswordResetEmail(user.email, resetUrl);
+
+    return res.json({ message: 'If an account exists with that email, a reset link has been sent.' });
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: { message: err.message } });
+    return next(err);
+  }
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(8),
+});
+
+router.post('/reset-password', async (req, res, next) => {
+  try {
+    const { token, password } = resetPasswordSchema.parse(req.body);
+    const user = await User.findOne({
+      resetPasswordToken: token,
+      resetPasswordExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: { message: 'Password reset token is invalid or has expired.' } });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    user.passwordHash = passwordHash;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+
+    return res.json({ message: 'Password has been successfully reset.' });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: { message: err.message } });
     return next(err);

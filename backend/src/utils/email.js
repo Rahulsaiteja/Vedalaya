@@ -63,3 +63,34 @@ export async function sendTrainingCompleteEmail(to, studentName) {
     throw new Error('Failed to send training complete email');
   }
 }
+
+export async function sendPasswordResetEmail(to, resetUrl) {
+  try {
+    const mailTransporter = await createTransporter();
+
+    const info = await mailTransporter.sendMail({
+      from: env.SMTP_FROM,
+      to,
+      subject: `Password Reset Request - Vedalaya`,
+      text: `You requested a password reset. Click the link below to reset your password:\n\n${resetUrl}\n\nThis link will expire in 1 hour.`,
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+          <h2 style="color: #059669; margin-top: 0;">Password Reset</h2>
+          <p>Hello,</p>
+          <p>You requested a password reset for your account. Click the button below to set a new password:</p>
+          <a href="${resetUrl}" style="display: inline-block; background-color: #059669; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; margin-top: 10px;">Reset Password</a>
+          <p style="margin-top: 20px; font-size: 14px; color: #64748b;">
+            If the button doesn't work, copy and paste this URL into your browser:<br>
+            <a href="${resetUrl}" style="color: #059669;">${resetUrl}</a>
+          </p>
+          <p style="margin-top: 20px; font-size: 12px; color: #94a3b8;">This link will expire in 1 hour. If you didn't request this, you can safely ignore this email.</p>
+        </div>
+      `,
+    });
+
+    console.log('Password reset email sent: %s', info.messageId);
+  } catch (err) {
+    console.error('Error sending password reset email:', err);
+    throw new Error('Failed to send password reset email');
+  }
+}

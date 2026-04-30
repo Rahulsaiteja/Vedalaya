@@ -11,6 +11,8 @@ const userSchema = new mongoose.Schema(
     isActive: { type: Boolean, default: true },   // admin can deactivate accounts
     otp: { type: String },
     otpExpiry: { type: Date },
+    resetPasswordToken: { type: String },
+    resetPasswordExpires: { type: Date },
   },
   { timestamps: true },
 );

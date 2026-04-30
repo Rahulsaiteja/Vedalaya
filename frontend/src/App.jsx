@@ -9,6 +9,8 @@ import Chatbot from "./components/Chatbot";
 const LandingPage = lazy(() => import('./views/LandingPage.jsx').then(m => ({ default: m.LandingPage })))
 const LoginPage = lazy(() => import('./views/LoginPage.jsx').then(m => ({ default: m.LoginPage })))
 const RegisterPage = lazy(() => import('./views/RegisterPage.jsx').then(m => ({ default: m.RegisterPage })))
+const ForgotPasswordPage = lazy(() => import('./views/ForgotPasswordPage.jsx').then(m => ({ default: m.ForgotPasswordPage })))
+const ResetPasswordPage = lazy(() => import('./views/ResetPasswordPage.jsx').then(m => ({ default: m.ResetPasswordPage })))
 const StudentDashboard = lazy(() => import('./views/StudentDashboard.jsx').then(m => ({ default: m.StudentDashboard })))
 const TeacherDashboard = lazy(() => import('./views/TeacherDashboard.jsx').then(m => ({ default: m.TeacherDashboard })))
 const QuizAttemptPage = lazy(() => import('./views/QuizAttemptPage.jsx').then(m => ({ default: m.QuizAttemptPage })))
@@ -49,6 +51,8 @@ export default function App() {
               <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
 
               <Route element={<RequireAuth />}>
                 <Route

@@ -47,13 +47,20 @@ export function LoginPage() {
 
           <form onSubmit={onSubmit} className="space-y-6">
             <TextInput label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-            <TextInput
-              label="Password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+            <div className="flex flex-col gap-2">
+              <TextInput
+                label="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <div className="text-right">
+                <Link to="/forgot-password" className="text-xs font-bold text-emerald-600 hover:text-emerald-800">
+                  Forgot password?
+                </Link>
+              </div>
+            </div>
 
             {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 font-medium">{error}</div>}
 
