@@ -31,7 +31,7 @@ export async function sendOtpEmail(to, otp) {
     console.log('Message sent: %s', info.messageId);
   } catch (err) {
     console.error('Error sending email:', err);
-    throw new Error('Failed to send OTP email');
+    throw new Error('Failed to send OTP email: ' + err.message);
   }
 }
 
@@ -60,7 +60,7 @@ export async function sendTrainingCompleteEmail(to, studentName) {
     console.log('Training notification sent: %s', info.messageId);
   } catch (err) {
     console.error('Error sending training email:', err);
-    throw new Error('Failed to send training complete email');
+    throw new Error('Failed to send training complete email: ' + err.message);
   }
 }
 
@@ -91,6 +91,6 @@ export async function sendPasswordResetEmail(to, resetUrl) {
     console.log('Password reset email sent: %s', info.messageId);
   } catch (err) {
     console.error('Error sending password reset email:', err);
-    throw new Error('Failed to send password reset email');
+    throw new Error('Failed to send password reset email: ' + err.message);
   }
 }
