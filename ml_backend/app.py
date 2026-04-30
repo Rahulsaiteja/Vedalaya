@@ -28,7 +28,7 @@ DATASET_DIR      = os.path.join(DATA_DIR, "dataset")
 MODEL_PATH       = os.path.join(DATA_DIR, "custom_face_model_v2.h5")
 CLASS_NAMES_PATH = os.path.join(DATA_DIR, "class_names.json")
 IMG_SIZE         = 160
-CONFIDENCE_THRESHOLD = 0.85
+CONFIDENCE_THRESHOLD = 0.65
 
 os.makedirs(DATASET_DIR, exist_ok=True)
 
