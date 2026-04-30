@@ -210,6 +210,43 @@ threading.Thread(target=startup_sequence, daemon=True).start()
 def health():
     return jsonify({"status": "ok"}), 200
 
+
+@app.route('/debug-cloudinary', methods=['GET'])
+def debug_cloudinary():
+    """Check what's actually stored on Cloudinary."""
+    if not storage.is_configured():
+        return jsonify({"error": "Cloudinary not configured"}), 500
+    try:
+        import cloudinary.api
+        # Check faces
+        faces_result = cloudinary.api.resources(
+            type="upload",
+            prefix="vedalaya_faces/",
+            resource_type="image",
+            max_results=10,
+        )
+        # Check model
+        try:
+            import cloudinary.api as capi
+            model_result = capi.resource("vedalaya_model/custom_face_model_v2", resource_type="raw")
+            model_exists = True
+            model_size = model_result.get("bytes", 0)
+        except Exception:
+            model_exists = False
+            model_size = 0
+
+        return jsonify({
+            "faces_found": len(faces_result.get("resources", [])),
+            "sample_faces": [r["public_id"] for r in faces_result.get("resources", [])[:5]],
+            "model_exists": model_exists,
+            "model_size_bytes": model_size,
+            "local_dataset_dir": DATASET_DIR,
+            "local_model_path": MODEL_PATH,
+            "local_model_exists": os.path.exists(MODEL_PATH),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/status', methods=['GET'])
 def get_status():
     # Show local classes (populated after sync) or fall back to Cloudinary count
