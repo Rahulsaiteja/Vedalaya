@@ -281,4 +281,15 @@ router.post('/notify-training', async (req, res) => {
   }
 });
 
+// ── Trigger ML model retrain (admin only) ────────────────────────────
+router.post('/retrain', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const response = await axios.post(`${ML_URL()}/retrain`, {}, { timeout: 10000 });
+    res.json(response.data);
+  } catch (err) {
+    const msg = err?.response?.data?.error || err.message || 'Failed to trigger retrain.';
+    res.status(500).json({ error: msg });
+  }
+});
+
 export default router;

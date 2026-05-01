@@ -452,8 +452,108 @@ function AttendanceTab() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// MAIN PAGE
+// ML MODEL TAB
 // ═══════════════════════════════════════════════════════════════════════
+function MLModelTab() {
+  const [status, setStatus] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [retraining, setRetraining] = useState(false)
+  const [message, setMessage] = useState(null)
+  const [error, setError] = useState(null)
+
+  async function loadStatus() {
+    try {
+      const res = await api.get('/attendance/ml-status')
+      setStatus(res.data)
+    } catch {
+      setError('Could not reach ML service.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadStatus()
+    const interval = setInterval(loadStatus, 10000) // poll every 10s
+    return () => clearInterval(interval)
+  }, [])
+
+  async function triggerRetrain() {
+    if (!confirm('This will retrain the face recognition model with all registered student data. It takes 5–15 minutes. Continue?')) return
+    setRetraining(true)
+    setMessage(null)
+    setError(null)
+    try {
+      const res = await api.post('/attendance/retrain')
+      setMessage(res.data?.status || 'Retraining started. Check status below.')
+    } catch (err) {
+      setError(err?.response?.data?.error || 'Failed to start retraining.')
+    } finally {
+      setRetraining(false)
+    }
+  }
+
+  if (loading) return <div className="text-slate-400 text-center py-12 animate-pulse">Loading ML status…</div>
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-slate-700">Face Recognition Model</h2>
+          <p className="text-sm text-slate-400 mt-1">Retrain the model after registering new students to improve accuracy.</p>
+        </div>
+        <button
+          onClick={triggerRetrain}
+          disabled={retraining || status?.is_training}
+          className="px-6 py-3 rounded-xl bg-emerald-700 text-white font-bold text-sm hover:bg-emerald-600 disabled:opacity-50 transition-colors shadow-sm"
+        >
+          {retraining || status?.is_training ? '⏳ Training in progress…' : '🔄 Retrain Model'}
+        </button>
+      </div>
+
+      {message && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 font-medium">{message}</div>}
+      {error   && <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 font-medium">{error}</div>}
+
+      {status && (
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div className="rounded-2xl border-2 border-slate-100 bg-white p-5 space-y-3">
+            <div className="text-xs font-bold tracking-widest text-slate-400 uppercase">Model Status</div>
+            <div className="flex items-center gap-2">
+              <span className={`w-3 h-3 rounded-full ${status.is_training ? 'bg-amber-400 animate-pulse' : status.model_status === 'Loaded' ? 'bg-emerald-500' : 'bg-rose-400'}`} />
+              <span className="font-bold text-slate-800">
+                {status.is_training ? 'Training…' : status.model_status}
+              </span>
+            </div>
+            {status.model_error && (
+              <div className="text-xs text-rose-600 bg-rose-50 rounded-lg p-2">{status.model_error}</div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border-2 border-slate-100 bg-white p-5 space-y-3">
+            <div className="text-xs font-bold tracking-widest text-slate-400 uppercase">Registered Students</div>
+            <div className="text-3xl font-black text-emerald-700">{status.trained_classes?.length || 0}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {(status.trained_classes || []).map(name => (
+                <span key={name} className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-100">{name}</span>
+              ))}
+              {(!status.trained_classes || status.trained_classes.length === 0) && (
+                <span className="text-xs text-slate-400">No students trained yet.</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 space-y-1">
+        <div className="font-bold text-slate-700 mb-2">How to get 80%+ accuracy:</div>
+        <div>1. Register each student with <strong>100+ face images</strong> in varied lighting</div>
+        <div>2. Click <strong>Retrain Model</strong> after adding new students</div>
+        <div>3. Ensure good lighting when marking attendance</div>
+        <div>4. Re-register students who are frequently not recognized</div>
+      </div>
+    </div>
+  )
+}
 export function AdminDashboard() {
   const [tab, setTab] = useState('overview')
   const [pendingCount, setPendingCount] = useState(0)
@@ -475,6 +575,7 @@ export function AdminDashboard() {
         <Tab active={tab === 'users'} onClick={() => setTab('users')} badge={pendingCount}>Users</Tab>
         <Tab active={tab === 'classes'} onClick={() => setTab('classes')}>Classes</Tab>
         <Tab active={tab === 'attendance'} onClick={() => setTab('attendance')}>Attendance</Tab>
+        <Tab active={tab === 'ml'} onClick={() => setTab('ml')}>ML Model</Tab>
       </div>
 
       <div>
@@ -482,6 +583,7 @@ export function AdminDashboard() {
         {tab === 'users'      && <UsersTab />}
         {tab === 'classes'    && <ClassesTab />}
         {tab === 'attendance' && <AttendanceTab />}
+        {tab === 'ml'         && <MLModelTab />}
       </div>
     </div>
   )
