@@ -33,7 +33,7 @@ router.post("/chat", async (req, res) => {
     }
 
     const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     
     const prompt = `
 You are "Vedalaya AI Assistant", a smart and friendly chatbot for a remote classroom platform built for rural students.
@@ -89,10 +89,9 @@ ${message}
     res.json({ reply });
 
   } catch (error) {
-    console.error("Gemini Error:", error.message);
-
+    console.error("Gemini Error:", error.message, error.status, error.errorDetails);
     res.status(500).json({
-      reply: "Sorry, I am facing technical issues right now. Please try again later.",
+      reply: `Sorry, I am facing technical issues right now. Error: ${error.message}`,
     });
   }
 });
