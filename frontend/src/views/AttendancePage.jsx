@@ -206,7 +206,7 @@ function MarkAttendanceTab() {
 // ═════════════════════════════════════════════════════════════════════
 // REGISTER STUDENT TAB (teacher only)
 // ═════════════════════════════════════════════════════════════════════
-const CAPTURE_COUNT = 100
+const CAPTURE_COUNT = 200
 
 function RegisterStudentTab() {
   const { user } = useAuth()
