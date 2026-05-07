@@ -56,8 +56,10 @@ export function TeacherLecturesPage() {
           fileType: file.type,
         })
         const sigData = sigRes.data
+        console.log('[Upload] Provider:', sigData.provider, sigData)
 
         if (sigData.provider === 's3') {
+          console.log('[Upload] Starting S3 PUT to:', sigData.presignedUrl?.substring(0, 80) + '...')
           // S3 direct upload via presigned PUT URL
           await axios.put(sigData.presignedUrl, file, {
             headers: { 'Content-Type': file.type },
@@ -70,7 +72,8 @@ export function TeacherLecturesPage() {
           }).catch(err => {
             const status = err?.response?.status
             const msg = err?.response?.data || err?.message || 'Unknown error'
-            if (!status) throw new Error('S3 upload failed: Network Error — check S3 bucket CORS settings allow PUT from your domain.')
+            console.error('[Upload] S3 error:', status, msg)
+            if (!status) throw new Error('S3 upload failed: Network Error — bucket CORS may not be configured. Check AWS S3 → vedhalaya-lectures → Permissions → CORS.')
             throw new Error(`S3 upload failed (HTTP ${status}): ${msg}`)
           })
 
