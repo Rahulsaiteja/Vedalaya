@@ -71,7 +71,14 @@ export function TeacherLecturesPage() {
             maxContentLength: Infinity,
             maxBodyLength: Infinity,
           }
-        )
+        ).catch(err => {
+          // Extract the real Cloudinary error message
+          const cloudinaryMsg = err?.response?.data?.error?.message
+          const httpStatus = err?.response?.status
+          if (cloudinaryMsg) throw new Error(`Cloudinary: ${cloudinaryMsg}`)
+          if (httpStatus) throw new Error(`Upload failed (HTTP ${httpStatus}). File may be too large or connection dropped.`)
+          throw new Error('Network error during upload. Check your internet connection and try again.')
+        })
 
         cloudinaryUrl = cloudRes.data.secure_url
         cloudinaryPublicId = cloudRes.data.public_id

@@ -266,26 +266,41 @@ function RegisterStudentTab() {
     setCapturing(false)
   }
 
+  const [uploadProgress, setUploadProgress] = useState(0)
+
   async function uploadFaces() {
     if (!nameToUse || captured.length === 0) return
-    setUploading(true); setError(null); setResult(null)
+    setUploading(true); setError(null); setResult(null); setUploadProgress(0)
     try {
-      const formData = new FormData()
-      formData.append('name', nameToUse)
-      if (user?.email) formData.append('teacherEmail', user.email)
-      
-      for (const b64 of captured) {
-        const blob = await (await fetch(b64)).blob()
-        formData.append('images', blob, 'frame.jpg')
+      const BATCH_SIZE = 20
+      let lastResult = null
+      const totalBatches = Math.ceil(captured.length / BATCH_SIZE)
+
+      for (let i = 0; i < captured.length; i += BATCH_SIZE) {
+        const batch = captured.slice(i, i + BATCH_SIZE)
+        const formData = new FormData()
+        formData.append('name', nameToUse)
+        if (user?.email) formData.append('teacherEmail', user.email)
+
+        for (const b64 of batch) {
+          const blob = await (await fetch(b64)).blob()
+          formData.append('images', blob, 'frame.jpg')
+        }
+
+        const res = await api.post('/attendance/register-face', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: 120_000,
+        })
+        if (res.status >= 400) throw new Error(res.data?.error || 'Upload failed')
+        lastResult = res.data
+
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1
+        setUploadProgress(Math.round((batchNum / totalBatches) * 100))
       }
-      const res = await api.post('/attendance/register-face', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 300_000, // 5 minutes for large uploads
-      })
-      const data = res.data
-      if (res.status >= 400) throw new Error(data.error || 'Upload failed')
-      setResult(data)
+
+      setResult(lastResult)
       setCaptured([])
+      setUploadProgress(100)
     } catch (err) {
       setError(err?.response?.data?.error || err.message)
     } finally {
