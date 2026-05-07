@@ -51,7 +51,9 @@ function extractFeatures(text) {
   const sentences = doc.sentences().out('array');
   const people = doc.people().out('array');
   const places = doc.places().out('array');
-  const dates = doc.dates().out('array');
+  // compromise requires a plugin for .dates() — extract year patterns manually instead
+  const dateMatches = text.match(/\b(1[0-9]{3}|20[0-9]{2})\b/g) || [];
+  const dates = [...new Set(dateMatches)];
   
   const definitions = [];
   sentences.forEach(sentence => {
@@ -217,8 +219,9 @@ export function generateFlashcardsRuleBased(text, maxCards = 10) {
     }
   });
   
-  // Extract dates and events
-  const dates = doc.dates().out('array');
+  // Extract dates and events (year patterns)
+  const dateMatches = text.match(/\b(1[0-9]{3}|20[0-9]{2})\b/g) || [];
+  const dates = [...new Set(dateMatches)];
   dates.forEach(date => {
     if (cards.length < maxCards) {
       const context = doc.match(date).sentences().out('text');
