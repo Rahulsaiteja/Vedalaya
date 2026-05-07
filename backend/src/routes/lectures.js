@@ -122,7 +122,8 @@ router.post(
           cloudinary.uploader.upload_large(absolutePath, {
             resource_type: 'auto',
             folder: 'vedalaya_lectures',
-            chunk_size: 6000000,
+            chunk_size: 20000000, // 20MB chunks for better reliability
+            timeout: 600000, // 10 minute timeout per chunk
           }, (error, result) => {
             if (error) reject(error);
             else resolve(result);

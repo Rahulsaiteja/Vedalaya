@@ -68,6 +68,8 @@ export function TeacherLecturesPage() {
               if (e.total) setUploadProgress(Math.round((e.loaded / e.total) * 100))
             },
             timeout: 0, // no timeout for large files
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
           }
         )
 
@@ -198,19 +200,34 @@ export function TeacherLecturesPage() {
       return
     }
     
+    // Check file size limit (1GB = 1024 MB)
+    const maxSizeBytes = 1024 * 1024 * 1024 // 1GB
+    if (selectedFile.size > maxSizeBytes) {
+      setError(`File size cannot exceed 1GB. This file is ${(selectedFile.size / (1024 * 1024 * 1024)).toFixed(2)} GB.`)
+      setFile(null)
+      return
+    }
+    
     if (selectedFile.type.startsWith('video/') || selectedFile.type.startsWith('audio/')) {
       const media = document.createElement(selectedFile.type.startsWith('video/') ? 'video' : 'audio')
       media.preload = 'metadata'
       media.onloadedmetadata = function() {
         window.URL.revokeObjectURL(media.src)
         const durationMin = media.duration / 60
-        if (durationMin > 30) {
-          setError(`Lectures cannot exceed 30 minutes. This file is ${durationMin.toFixed(1)} minutes.`)
+        // Increased duration limit to 2 hours for longer lectures
+        if (durationMin > 120) {
+          setError(`Lectures cannot exceed 2 hours. This file is ${durationMin.toFixed(1)} minutes.`)
           setFile(null)
         } else {
           setError(null)
           setFile(selectedFile)
         }
+      }
+      media.onerror = function() {
+        // If metadata loading fails, still allow the file (might be a codec issue)
+        window.URL.revokeObjectURL(media.src)
+        setError(null)
+        setFile(selectedFile)
       }
       media.src = URL.createObjectURL(selectedFile)
     } else {
