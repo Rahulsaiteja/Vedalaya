@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../utils/api.js'
 import { Card, PrimaryButton } from '../ui/form.jsx'
+import { useLanguage } from '../state/LanguageContext.jsx'
 
 export function QuizDetailsPage() {
   const { id } = useParams()
+  const { t } = useLanguage()
   const [quiz, setQuiz] = useState(null)
   const [error, setError] = useState(null)
 
@@ -27,7 +29,7 @@ export function QuizDetailsPage() {
     <div className="max-w-3xl mx-auto mt-8">
       {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 font-medium mb-6">{error}</div>}
       {!quiz ? (
-        <div className="text-slate-400 font-medium text-center py-10 animate-pulse">Loading quiz details…</div>
+        <div className="text-slate-400 font-medium text-center py-10 animate-pulse">{t('loading_quiz_details')}</div>
       ) : (
         <Card>
           <div className="flex flex-col md:flex-row items-center md:items-start justify-between gap-8 text-center md:text-left">
@@ -37,12 +39,12 @@ export function QuizDetailsPage() {
               
               <div className="mt-8 flex flex-wrap items-center justify-center md:justify-start gap-4">
                 <div className="bg-slate-50 border border-slate-200 rounded-xl px-5 py-3">
-                  <div className="text-[10px] font-bold tracking-[0.2em] text-slate-400 uppercase mb-1">Questions</div>
+                  <div className="text-[10px] font-bold tracking-[0.2em] text-slate-400 uppercase mb-1">{t('questions')}</div>
                   <div className="text-xl font-bold text-slate-800">{quiz.questions?.length || 0}</div>
                 </div>
                 {quiz.timeLimitSeconds && (
                   <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-5 py-3">
-                    <div className="text-[10px] font-bold tracking-[0.2em] text-emerald-600 uppercase mb-1">Time Limit</div>
+                    <div className="text-[10px] font-bold tracking-[0.2em] text-emerald-600 uppercase mb-1">{t('time_limit')}</div>
                     <div className="text-xl font-bold text-emerald-900">
                       {Math.floor(quiz.timeLimitSeconds / 60) > 0 && `${Math.floor(quiz.timeLimitSeconds / 60)}m `}
                       {quiz.timeLimitSeconds % 60 > 0 ? `${quiz.timeLimitSeconds % 60}s` : ''}
@@ -58,17 +60,17 @@ export function QuizDetailsPage() {
                 <div className="text-center">
                   <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-emerald-100 px-4 py-1.5 text-xs font-bold tracking-widest text-emerald-800 uppercase">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
-                    Quiz Completed
+                    {t('quiz_completed')}
                   </div>
-                  <p className="text-sm font-medium text-slate-500 mb-4 text-center">You have already attempted this quiz.</p>
+                  <p className="text-sm font-medium text-slate-500 mb-4 text-center">{t('already_attempted')}</p>
                   <Link to="/student" className="block w-full text-center rounded-full border-2 border-slate-200 px-6 py-3 text-xs font-bold tracking-widest text-slate-600 hover:bg-slate-50 hover:text-emerald-800 hover:border-emerald-200 transition-colors">
-                    BACK TO DASHBOARD
+                    {t('back_to_dashboard').toUpperCase()}
                   </Link>
                 </div>
               ) : (
                 <Link to={`/quizzes/${id}/attempt`} className="block w-full md:w-auto">
                   <button className="w-full md:w-auto rounded-full bg-emerald-600 px-8 py-4 text-sm font-bold tracking-widest text-white hover:bg-emerald-500 shadow-md hover:shadow-lg transition-all focus:outline-none focus:ring-4 focus:ring-emerald-600/20 active:scale-95 whitespace-nowrap">
-                    START QUIZ
+                    {t('start_quiz').toUpperCase()}
                   </button>
                 </Link>
               )}

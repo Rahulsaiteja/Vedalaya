@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../utils/api.js'
 import { Card, PrimaryButton } from '../ui/form.jsx'
+import { useLanguage } from '../state/LanguageContext.jsx'
 
 export function QuizAttemptPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { t } = useLanguage()
   const [quiz, setQuiz] = useState(null)
   const [selected, setSelected] = useState({})
   const [busy, setBusy] = useState(false)
@@ -101,17 +103,17 @@ export function QuizAttemptPage() {
       <div className="mx-auto max-w-3xl mt-8">
         <Card>
           <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-emerald-900 tracking-tight">Quiz Complete</h2>
+            <h2 className="text-3xl font-bold text-emerald-900 tracking-tight">{t('quiz_complete')}</h2>
             <p className="mt-2 text-slate-500 font-medium text-lg">
-              Your score: <span className="font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-lg ml-2">{result.score}%</span>
+              {t('your_score')}: <span className="font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-lg ml-2">{result.score}%</span>
             </p>
           </div>
           {review?.review?.length ? (
             <div className="mt-8 space-y-4">
-              <div className="text-sm font-bold tracking-widest text-slate-400 uppercase border-b border-slate-100 pb-2">Review</div>
+              <div className="text-sm font-bold tracking-widest text-slate-400 uppercase border-b border-slate-100 pb-2">{t('review')}</div>
               {review.review.map((q, idx) => (
                 <div key={q.questionId} className="rounded-2xl border-2 border-slate-100 bg-slate-50 p-6">
-                  <div className="text-xs font-bold tracking-widest text-emerald-700 uppercase mb-2">Question {idx + 1}</div>
+                  <div className="text-xs font-bold tracking-widest text-emerald-700 uppercase mb-2">{t('question')} {idx + 1}</div>
                   <div className="text-lg font-bold text-slate-800">{q.prompt}</div>
                   <ul className="mt-4 space-y-2 text-sm font-medium">
                     {q.options.map((opt, oi) => {
@@ -141,9 +143,9 @@ export function QuizAttemptPage() {
             </div>
           ) : null}
           <div className="mt-10 flex flex-wrap justify-center gap-4">
-            <PrimaryButton onClick={() => navigate('/student')}>BACK TO DASHBOARD</PrimaryButton>
+            <PrimaryButton onClick={() => navigate('/student')}>{t('back_to_dashboard').toUpperCase()}</PrimaryButton>
             <Link to={`/quizzes/${id}`} className="rounded-full border-2 border-slate-200 px-6 py-3 text-xs font-bold tracking-widest text-slate-600 hover:bg-slate-50 hover:text-emerald-800 hover:border-emerald-200 transition-colors">
-              VIEW QUIZ DETAILS
+              {t('view_quiz_details').toUpperCase()}
             </Link>
           </div>
         </Card>
@@ -155,14 +157,14 @@ export function QuizAttemptPage() {
     <div className="max-w-4xl mx-auto mt-4">
       {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 font-medium mb-6">{error}</div>}
       {!quiz ? (
-        <div className="text-slate-400 font-medium text-center py-20 animate-pulse">Loading quiz…</div>
+        <div className="text-slate-400 font-medium text-center py-20 animate-pulse">{t('loading_quiz')}</div>
       ) : (
         <div className="grid gap-8">
           <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 flex flex-wrap items-center justify-between gap-6 sticky top-24 z-40">
             <div>
               <h2 className="text-3xl font-bold text-emerald-900 tracking-tight">{quiz.title}</h2>
               <div className="mt-4 flex items-center gap-3 text-xs font-bold tracking-widest text-slate-400 uppercase">
-                <span className="bg-slate-100 px-3 py-1.5 rounded-md text-emerald-800">{questions.length} Questions</span>
+                <span className="bg-slate-100 px-3 py-1.5 rounded-md text-emerald-800">{questions.length} {t('questions')}</span>
                 {timeLeft != null && (
                   <span className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors ${
                     timeLeft <= 60 ? 'bg-rose-100 text-rose-700 animate-pulse' : 'bg-emerald-50 text-emerald-700'
@@ -174,7 +176,7 @@ export function QuizAttemptPage() {
               </div>
             </div>
             <PrimaryButton onClick={submit} disabled={busy || (timeLeft != null && timeLeft <= 0)}>
-              {busy ? 'SUBMITTING…' : 'SUBMIT ANSWERS'}
+              {busy ? t('submitting').toUpperCase() : t('submit_answers').toUpperCase()}
             </PrimaryButton>
           </div>
 
@@ -183,7 +185,7 @@ export function QuizAttemptPage() {
               <Card key={q._id}>
                 <div className="flex items-center gap-3 mb-6">
                   <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-lg">{idx + 1}</div>
-                  <div className="text-xs font-bold tracking-widest text-slate-400 uppercase">Question</div>
+                  <div className="text-xs font-bold tracking-widest text-slate-400 uppercase">{t('question')}</div>
                 </div>
                 
                 <h3 className="text-xl font-bold text-slate-800 leading-snug mb-8">{q.prompt}</h3>

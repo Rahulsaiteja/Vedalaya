@@ -18,6 +18,8 @@ const lectureSchema = new mongoose.Schema(
       size: { type: Number, default: 0 },
       cloudinaryUrl: { type: String, default: '' },
       cloudinaryPublicId: { type: String, default: '' },
+      s3Key: { type: String, default: '' },
+      s3Url: { type: String, default: '' },
     },
     variants: [{
       quality: { type: String, default: 'original' },

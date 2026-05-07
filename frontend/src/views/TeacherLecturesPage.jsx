@@ -43,48 +43,78 @@ export function TeacherLecturesPage() {
     try {
       let cloudinaryUrl = ''
       let cloudinaryPublicId = ''
+      let s3Url = ''
+      let s3Key = ''
       let originalName = ''
       let mimeType = ''
       let fileSize = 0
 
       if (file) {
         // Step 1: get signed upload params from backend
-        const sigRes = await api.post('/lectures/sign-upload')
-        const { signature, timestamp, folder, cloudName, apiKey } = sigRes.data
+        const sigRes = await api.post('/lectures/sign-upload', {
+          fileName: file.name,
+          fileType: file.type,
+        })
+        const sigData = sigRes.data
 
-        // Step 2: upload directly to Cloudinary (bypasses Render timeout)
-        const fd = new FormData()
-        fd.append('file', file)
-        fd.append('api_key', apiKey)
-        fd.append('timestamp', timestamp)
-        fd.append('signature', signature)
-        fd.append('folder', folder)
-
-        const cloudRes = await axios.post(
-          `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
-          fd,
-          {
+        if (sigData.provider === 's3') {
+          // S3 direct upload via presigned PUT URL
+          await axios.put(sigData.presignedUrl, file, {
+            headers: { 'Content-Type': file.type },
             onUploadProgress: (e) => {
               if (e.total) setUploadProgress(Math.round((e.loaded / e.total) * 100))
             },
-            timeout: 0, // no timeout for large files
+            timeout: 0,
             maxContentLength: Infinity,
             maxBodyLength: Infinity,
-          }
-        ).catch(err => {
-          // Extract the real Cloudinary error message
-          const cloudinaryMsg = err?.response?.data?.error?.message
-          const httpStatus = err?.response?.status
-          if (cloudinaryMsg) throw new Error(`Cloudinary: ${cloudinaryMsg}`)
-          if (httpStatus) throw new Error(`Upload failed (HTTP ${httpStatus}). File may be too large or connection dropped.`)
-          throw new Error('Network error during upload. Check your internet connection and try again.')
-        })
+          }).catch(err => {
+            throw new Error('S3 upload failed: ' + (err?.message || 'Network error'))
+          })
 
-        cloudinaryUrl = cloudRes.data.secure_url
-        cloudinaryPublicId = cloudRes.data.public_id
-        originalName = file.name
-        mimeType = file.type
-        fileSize = file.size
+          cloudinaryUrl = sigData.fileUrl  // reuse field for the URL
+          cloudinaryPublicId = sigData.key
+          originalName = file.name
+          mimeType = file.type
+          fileSize = file.size
+          // Mark as S3 upload
+          s3Url = sigData.fileUrl
+          s3Key = sigData.key
+
+        } else {
+          // Cloudinary fallback
+          const { signature, timestamp, folder, cloudName, apiKey } = sigData
+          const fd = new FormData()
+          fd.append('file', file)
+          fd.append('api_key', apiKey)
+          fd.append('timestamp', timestamp)
+          fd.append('signature', signature)
+          fd.append('folder', folder)
+
+          const cloudRes = await axios.post(
+            `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
+            fd,
+            {
+              onUploadProgress: (e) => {
+                if (e.total) setUploadProgress(Math.round((e.loaded / e.total) * 100))
+              },
+              timeout: 0,
+              maxContentLength: Infinity,
+              maxBodyLength: Infinity,
+            }
+          ).catch(err => {
+            const cloudinaryMsg = err?.response?.data?.error?.message
+            const httpStatus = err?.response?.status
+            if (cloudinaryMsg) throw new Error(`Cloudinary: ${cloudinaryMsg}`)
+            if (httpStatus) throw new Error(`Upload failed (HTTP ${httpStatus}).`)
+            throw new Error('Network error during upload. Check your internet connection and try again.')
+          })
+
+          cloudinaryUrl = cloudRes.data.secure_url
+          cloudinaryPublicId = cloudRes.data.public_id
+          originalName = file.name
+          mimeType = file.type
+          fileSize = file.size
+        }
       }
 
       // Step 3: save lecture metadata to backend
@@ -93,7 +123,13 @@ export function TeacherLecturesPage() {
       body.set('description', description)
       if (category.trim()) body.set('category', category.trim())
       if (youtubeUrl.trim()) body.set('youtubeUrl', youtubeUrl.trim())
-      if (cloudinaryUrl) {
+      if (s3Url) {
+        body.set('s3Url', s3Url)
+        body.set('s3Key', s3Key)
+        body.set('originalName', originalName)
+        body.set('mimeType', mimeType)
+        body.set('fileSize', fileSize)
+      } else if (cloudinaryUrl) {
         body.set('cloudinaryUrl', cloudinaryUrl)
         body.set('cloudinaryPublicId', cloudinaryPublicId)
         body.set('originalName', originalName)

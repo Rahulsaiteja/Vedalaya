@@ -22,6 +22,11 @@ const envSchema = z.object({
   ML_SERVICE_URL: z.string().default('http://localhost:5001'),
   GEMINI_API_KEY: z.string().min(1),
   WEBHOOK_SECRET: z.string().min(8).optional(),
+  // AWS S3 for lecture video storage
+  AWS_ACCESS_KEY_ID: z.string().optional(),
+  AWS_SECRET_ACCESS_KEY: z.string().optional(),
+  AWS_REGION: z.string().default('eu-north-1'),
+  AWS_S3_BUCKET: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

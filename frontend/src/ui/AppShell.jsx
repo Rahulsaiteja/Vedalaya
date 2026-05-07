@@ -79,8 +79,27 @@ export function AppShell() {
         className="block w-full rounded-md border-0 py-1.5 pl-3 pr-8 text-sm font-bold text-slate-500 bg-transparent hover:text-emerald-800 transition-colors focus:ring-0 uppercase cursor-pointer outline-none appearance-none"
       >
         <option className="text-slate-800 normal-case" value="en">English</option>
-        <option className="text-slate-800 normal-case" value="pa">ਪੰਜਾਬੀ</option>
-        <option className="text-slate-800 normal-case" value="hi">हिन्दी</option>
+        <option className="text-slate-800 normal-case" value="pa">ਪੰਜਾਬੀ (Punjabi)</option>
+        <option className="text-slate-800 normal-case" value="hi">हिन्दी (Hindi)</option>
+        <option className="text-slate-800 normal-case" value="bn">বাংলা (Bengali)</option>
+        <option className="text-slate-800 normal-case" value="te">తెలుగు (Telugu)</option>
+        <option className="text-slate-800 normal-case" value="mr">मराठी (Marathi)</option>
+        <option className="text-slate-800 normal-case" value="ta">தமிழ் (Tamil)</option>
+        <option className="text-slate-800 normal-case" value="ur">اردو (Urdu)</option>
+        <option className="text-slate-800 normal-case" value="gu">ગુજરાતી (Gujarati)</option>
+        <option className="text-slate-800 normal-case" value="kn">ಕನ್ನಡ (Kannada)</option>
+        <option className="text-slate-800 normal-case" value="ml">മലയാളം (Malayalam)</option>
+        <option className="text-slate-800 normal-case" value="or">ଓଡ଼ିଆ (Odia)</option>
+        <option className="text-slate-800 normal-case" value="as">অসমীয়া (Assamese)</option>
+        <option className="text-slate-800 normal-case" value="mai">मैथिली (Maithili)</option>
+        <option className="text-slate-800 normal-case" value="kok">कोंकणी (Konkani)</option>
+        <option className="text-slate-800 normal-case" value="doi">डोगरी (Dogri)</option>
+        <option className="text-slate-800 normal-case" value="sa">संस्कृतम् (Sanskrit)</option>
+        <option className="text-slate-800 normal-case" value="ne">नेपाली (Nepali)</option>
+        <option className="text-slate-800 normal-case" value="sd">سنڌي (Sindhi)</option>
+        <option className="text-slate-800 normal-case" value="ks">کٲشُر (Kashmiri)</option>
+        <option className="text-slate-800 normal-case" value="mni">মৈতৈলোন্ (Manipuri)</option>
+        <option className="text-slate-800 normal-case" value="sat">ᱥᱟᱱᱛᱟᱲᱤ (Santali)</option>
       </select>
        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-400">
         <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
@@ -100,8 +119,8 @@ export function AppShell() {
           </NavItem>
 
           <NavItem to="/flashcards" onClick={() => setIsMobileMenuOpen(false)}>{t('flashcards')}</NavItem>
-          <NavItem to="/scholarships" onClick={() => setIsMobileMenuOpen(false)}>Scholarships</NavItem>
-          <NavItem to="/student/attendance" onClick={() => setIsMobileMenuOpen(false)}>Attendance</NavItem>
+          <NavItem to="/scholarships" onClick={() => setIsMobileMenuOpen(false)}>{t('scholarships')}</NavItem>
+          <NavItem to="/student/attendance" onClick={() => setIsMobileMenuOpen(false)}>{t('attendance')}</NavItem>
           {/* <NavItem to="/doubts" onClick={() => setIsMobileMenuOpen(false)}>Doubt AI</NavItem> */}
         </>
       )}
@@ -112,7 +131,7 @@ export function AppShell() {
           </NavItem>
 
           <NavItem to="/teacher/quizzes/new" onClick={() => setIsMobileMenuOpen(false)}>{t('create_quiz')}</NavItem>
-          <NavItem to="/teacher/attendance" onClick={() => setIsMobileMenuOpen(false)}>Attendance</NavItem>
+          <NavItem to="/teacher/attendance" onClick={() => setIsMobileMenuOpen(false)}>{t('attendance')}</NavItem>
         </>
       )}
       {isAuthed && user?.role === 'admin' && (

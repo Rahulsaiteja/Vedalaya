@@ -4,6 +4,8 @@ import path from 'path';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import { z } from 'zod';
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { uploadLecture } from '../middleware/upload.js';
@@ -17,16 +19,60 @@ cloudinary.config({
   api_secret: env.CLOUDINARY_API_SECRET,
 });
 
+// S3 client — only initialised if AWS credentials are present
+const s3 = env.AWS_ACCESS_KEY_ID && env.AWS_S3_BUCKET
+  ? new S3Client({
+      region: env.AWS_REGION,
+      credentials: {
+        accessKeyId: env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+      },
+    })
+  : null;
+
+const S3_BUCKET = env.AWS_S3_BUCKET || '';
+
 const router = express.Router();
 
-// Generate a signed upload signature so the frontend can upload directly to Cloudinary
-router.post('/sign-upload', requireAuth, requireRole('teacher'), (req, res) => {
+// Generate a presigned S3 URL so the frontend can upload directly to S3
+// Falls back to Cloudinary signed upload if S3 is not configured
+router.post('/sign-upload', requireAuth, requireRole('teacher'), async (req, res) => {
+  // S3 path
+  if (s3 && S3_BUCKET) {
+    try {
+      const { fileName, fileType } = req.body;
+      const ext = fileName ? path.extname(fileName) : '.mp4';
+      const key = `lectures/${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ext}`;
+
+      const command = new PutObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: key,
+        ContentType: fileType || 'video/mp4',
+      });
+
+      const presignedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 }); // 1 hour
+
+      const fileUrl = `https://${S3_BUCKET}.s3.${env.AWS_REGION}.amazonaws.com/${key}`;
+
+      return res.json({
+        provider: 's3',
+        presignedUrl,   // PUT directly to this URL
+        fileUrl,        // public URL after upload
+        key,
+      });
+    } catch (err) {
+      console.error('S3 presign error:', err);
+      return res.status(500).json({ error: { message: 'Failed to generate upload URL: ' + err.message } });
+    }
+  }
+
+  // Cloudinary fallback
   const timestamp = Math.round(Date.now() / 1000);
   const folder = 'vedalaya_lectures';
-  // Only sign folder + timestamp — resource_type is in the URL, not the signature
   const paramsToSign = { folder, timestamp };
   const signature = cloudinary.utils.api_sign_request(paramsToSign, env.CLOUDINARY_API_SECRET);
-  res.json({
+  return res.json({
+    provider: 'cloudinary',
     signature,
     timestamp,
     folder,
@@ -89,6 +135,9 @@ router.post(
       // Direct Cloudinary upload fields (when frontend uploads directly)
       cloudinaryUrl: z.string().optional().default(''),
       cloudinaryPublicId: z.string().optional().default(''),
+      // S3 upload fields
+      s3Url: z.string().optional().default(''),
+      s3Key: z.string().optional().default(''),
       originalName: z.string().optional().default(''),
       mimeType: z.string().optional().default(''),
       fileSize: z.coerce.number().optional().default(0),
@@ -102,17 +151,22 @@ router.post(
     const isYoutube = Boolean(youtubeVideoId);
 
     // Direct upload path — Cloudinary URL provided by frontend
-    const isDirectUpload = Boolean(parsed.data.cloudinaryUrl);
+    const isDirectUpload = Boolean(parsed.data.cloudinaryUrl) || Boolean(parsed.data.s3Url);
 
     if (!isYoutube && !req.file && !isDirectUpload) {
-      return res.status(400).json({ error: { message: 'Provide either a file, a Cloudinary upload, or a valid YouTube URL' } });
+      return res.status(400).json({ error: { message: 'Provide either a file, a Cloudinary upload, an S3 upload, or a valid YouTube URL' } });
     }
 
     let cloudinaryUrl = parsed.data.cloudinaryUrl || '';
     let cloudinaryPublicId = parsed.data.cloudinaryPublicId || '';
+    let s3Url = parsed.data.s3Url || '';
+    let s3Key = parsed.data.s3Key || '';
     let fileName = parsed.data.originalName || '';
     let fileMime = parsed.data.mimeType || '';
     let fileSize = parsed.data.fileSize || 0;
+
+    // Use S3 URL as the primary URL if available
+    const primaryUrl = s3Url || cloudinaryUrl;
 
     // Legacy path — file uploaded through Render (small files only)
     if (!isYoutube && req.file && !isDirectUpload) {
@@ -157,14 +211,16 @@ router.post(
         originalName: fileName,
         mimeType: fileMime,
         size: fileSize,
-        cloudinaryUrl,
+        cloudinaryUrl: primaryUrl,
         cloudinaryPublicId,
+        s3Key,
+        s3Url,
       },
       variants: isYoutube ? [] : [
-        { quality: 'original', storedName: fileName, mimeType: fileMime, size: fileSize, cloudinaryUrl, cloudinaryPublicId },
-        { quality: '720p',     storedName: fileName, mimeType: fileMime, size: fileSize, cloudinaryUrl, cloudinaryPublicId },
-        { quality: '480p',     storedName: fileName, mimeType: fileMime, size: fileSize, cloudinaryUrl, cloudinaryPublicId },
-        { quality: '360p',     storedName: fileName, mimeType: fileMime, size: fileSize, cloudinaryUrl, cloudinaryPublicId },
+        { quality: 'original', storedName: fileName, mimeType: fileMime, size: fileSize, cloudinaryUrl: primaryUrl, cloudinaryPublicId },
+        { quality: '720p',     storedName: fileName, mimeType: fileMime, size: fileSize, cloudinaryUrl: primaryUrl, cloudinaryPublicId },
+        { quality: '480p',     storedName: fileName, mimeType: fileMime, size: fileSize, cloudinaryUrl: primaryUrl, cloudinaryPublicId },
+        { quality: '360p',     storedName: fileName, mimeType: fileMime, size: fileSize, cloudinaryUrl: primaryUrl, cloudinaryPublicId },
       ],
       processingStatus: 'completed',
     });
@@ -287,8 +343,17 @@ router.delete('/:id', requireAuth, requireRole('teacher'), async (req, res) => {
   if (!lecture) return res.status(404).json({ error: { message: 'Lecture not found' } });
   if (lecture.createdBy.toString() !== req.user.sub) return res.status(403).json({ error: { message: 'Forbidden' } });
 
-  // Delete from Cloudinary
-  if (lecture.file?.cloudinaryPublicId) {
+  // Delete from S3 if stored there
+  if (lecture.file?.s3Key && s3 && S3_BUCKET) {
+    try {
+      await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: lecture.file.s3Key }));
+    } catch (e) {
+      console.error('Failed to delete from S3:', e);
+    }
+  }
+
+  // Delete from Cloudinary if stored there (legacy)
+  if (lecture.file?.cloudinaryPublicId && !lecture.file?.s3Key) {
     try {
       await cloudinary.uploader.destroy(lecture.file.cloudinaryPublicId, { resource_type: lecture.mediaType === 'video' ? 'video' : 'raw' });
     } catch (e) {

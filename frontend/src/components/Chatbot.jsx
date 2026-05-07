@@ -24,9 +24,13 @@ export default function Chatbot() {
       ]);
     } catch (err) {
       console.error(err);
+      const serverReply =
+        err?.response?.data?.reply ||
+        err?.response?.data?.error?.message ||
+        err?.message;
       setChat([
         ...newChat,
-        { sender: "bot", text: "Error connecting to chatbot" }
+        { sender: "bot", text: serverReply || "Error connecting to chatbot" }
       ]);
     }
 
