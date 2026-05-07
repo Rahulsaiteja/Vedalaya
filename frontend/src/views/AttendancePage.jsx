@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import Webcam from 'react-webcam'
 import { api } from '../utils/api.js'
 import { useAuth } from '../state/AuthContext.jsx'
+import { useLanguage } from '../state/LanguageContext.jsx'
 import { TeacherClassesPage as ManageClassesTab } from './TeacherClassesPage.jsx'
 
 // ── small helpers ─────────────────────────────────────────────────────
@@ -61,6 +62,7 @@ function MarkAttendanceTab() {
   const [classes, setClasses]  = useState([])
   const [selectedClass, setSelectedClass] = useState('')
   const { user } = useAuth()
+  const { t } = useLanguage()
   const isTeacher = user?.role === 'teacher'
 
   useEffect(() => {
@@ -111,10 +113,10 @@ function MarkAttendanceTab() {
       {/* Stats row for student */}
       {stats && !isTeacher && (
         <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <StatCard label="Total Days"    value={stats.total}      color="blue" />
-          <StatCard label="Present"       value={stats.present}    color="emerald" />
-          <StatCard label="Absent"        value={stats.absent}     color="rose" />
-          <StatCard label="Attendance %"  value={`${stats.percentage}%`} color="amber" />
+          <StatCard label={t('total_days')}    value={stats.total}      color="blue" />
+          <StatCard label={t('present')}       value={stats.present}    color="emerald" />
+          <StatCard label={t('absent')}        value={stats.absent}     color="rose" />
+          <StatCard label={t('attendance_pct')}  value={`${stats.percentage}%`} color="amber" />
         </div>
       )}
 
@@ -122,7 +124,7 @@ function MarkAttendanceTab() {
       {isTeacher && (
         <div className="w-full max-w-2xl">
           <label className="block text-xs font-bold tracking-widest uppercase text-slate-400 mb-2">
-            Select Class Section *
+            {t('select_class')} *
           </label>
           <select
             id="mark-attendance-class-select"
@@ -130,7 +132,7 @@ function MarkAttendanceTab() {
             onChange={e => setSelectedClass(e.target.value)}
             className="w-full rounded-xl bg-slate-700 border border-slate-600 text-slate-100 px-4 py-3 outline-none focus:border-emerald-500 transition-colors"
           >
-            <option value="">— Choose a class section —</option>
+            <option value="">{t('choose_class')}</option>
             {classes.map(c => (
               <option key={c._id} value={c._id}>
                 {c.name}{c.section ? ` · ${c.section}` : ''} ({c.students?.length || 0} students)
@@ -138,7 +140,7 @@ function MarkAttendanceTab() {
             ))}
           </select>
           {classes.length === 0 && (
-            <p className="text-xs text-slate-400 mt-2">No classes found. <a href="/teacher/classes" className="text-emerald-400 underline">Create a class first.</a></p>
+            <p className="text-xs text-slate-400 mt-2">{t('no_classes')} <a href="/teacher/classes" className="text-emerald-400 underline">Create a class first.</a></p>
           )}
         </div>
       )}
@@ -159,14 +161,14 @@ function MarkAttendanceTab() {
         {loading && (
           <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
             <div className="text-emerald-400 font-bold text-sm animate-pulse tracking-widest uppercase">
-              Scanning…
+              {t('scanning')}
             </div>
           </div>
         )}
       </div>
 
       <p className="text-slate-400 text-sm text-center max-w-md">
-        Look directly at the camera with your face well-lit, then click capture.
+        {t('look_at_camera')}
       </p>
 
       <button
@@ -175,7 +177,7 @@ function MarkAttendanceTab() {
         disabled={loading}
         className="relative px-10 py-3.5 rounded-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-50 text-white font-bold tracking-wide shadow-lg shadow-emerald-900/40 transition-all"
       >
-        {loading ? 'Processing…' : '📸 Capture & Mark Attendance'}
+        {loading ? t('processing') : `📸 ${t('capture_btn')}`}
       </button>
 
       {error && (
@@ -206,10 +208,11 @@ function MarkAttendanceTab() {
 // ═════════════════════════════════════════════════════════════════════
 // REGISTER STUDENT TAB (teacher only)
 // ═════════════════════════════════════════════════════════════════════
-const CAPTURE_COUNT = 200
+const CAPTURE_COUNT = 100
 
 function RegisterStudentTab() {
   const { user } = useAuth()
+  const { t } = useLanguage()
   const webcamRef       = useRef(null)
   const [students, setStudents] = useState([])
   const [selected, setSelected] = useState('')
@@ -277,6 +280,7 @@ function RegisterStudentTab() {
       }
       const res = await api.post('/attendance/register-face', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300_000, // 5 minutes for large uploads
       })
       const data = res.data
       if (res.status >= 400) throw new Error(data.error || 'Upload failed')
@@ -296,7 +300,7 @@ function RegisterStudentTab() {
       {/* Student selector */}
       <div className="w-full max-w-2xl space-y-3">
         <label className="block text-xs font-bold tracking-widest uppercase text-slate-400">
-          Select Student
+          {t('select_student')}
         </label>
         <select
           id="register-student-select"
@@ -304,7 +308,7 @@ function RegisterStudentTab() {
           onChange={e => setSelected(e.target.value)}
           className="w-full rounded-xl bg-slate-700 border border-slate-600 text-slate-100 px-4 py-3 outline-none focus:border-emerald-500 transition-colors"
         >
-          <option value="">— Choose a registered student —</option>
+          <option value="">{t('choose_student')}</option>
           {students.map(s => (
             <option key={s._id} value={s._id}>{s.name} ({s.email})</option>
           ))}
@@ -395,14 +399,14 @@ function RegisterStudentTab() {
             disabled={!nameToUse || uploading}
             className="px-8 py-3 rounded-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-40 text-white font-bold tracking-wide shadow-lg transition-all"
           >
-            🎥 Start Capture ({CAPTURE_COUNT} frames)
+            🎥 {t('start_capture')} ({CAPTURE_COUNT} frames)
           </button>
         ) : (
           <button
             onClick={stopCapture}
             className="px-8 py-3 rounded-full bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-bold tracking-wide shadow-lg transition-all"
           >
-            ⏹ Stop
+            ⏹ {t('stop')}
           </button>
         )}
 
@@ -413,7 +417,7 @@ function RegisterStudentTab() {
             disabled={uploading}
             className="px-8 py-3 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-95 disabled:opacity-40 text-white font-bold tracking-wide shadow-lg transition-all"
           >
-            {uploading ? 'Uploading…' : `☁️ Upload ${captured.length} Frames`}
+            {uploading ? 'Uploading…' : `☁️ ${t('upload_frames')} (${captured.length})`}
           </button>
         )}
       </div>
@@ -503,6 +507,7 @@ function RegisterStudentTab() {
 // RECORDS TAB
 // ═════════════════════════════════════════════════════════════════════
 function RecordsTab({ isTeacher }) {
+  const { t } = useLanguage()
   const [records,  setRecords]  = useState([])
   const [students, setStudents] = useState([])
   const [classes,  setClasses]  = useState([])
@@ -555,7 +560,7 @@ function RecordsTab({ isTeacher }) {
       {isTeacher && stats.length > 0 && (
         <div>
           <h3 className="text-xs font-bold tracking-widest uppercase text-slate-400 mb-3">
-            Student Summary
+            {t('student_summary')}
           </h3>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {stats.map(s => (
@@ -666,13 +671,13 @@ function RecordsTab({ isTeacher }) {
             {loading ? (
               <tr>
                 <td colSpan={isTeacher ? 5 : 3} className="px-4 py-8 text-center text-slate-500 animate-pulse">
-                  Loading records…
+                  {t('loading_records')}
                 </td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={isTeacher ? 5 : 3} className="px-4 py-8 text-center text-slate-500">
-                  No records found.
+                  {t('no_records')}
                 </td>
               </tr>
             ) : (
