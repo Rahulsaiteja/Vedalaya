@@ -15,11 +15,13 @@
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@google/generative-ai": "^0.24.1",
+    "@tensorflow/tfjs-node": "^4.17.0",
     "@vladmandic/face-api": "^1.7.15",
     "axios": "^1.14.0",
     "bcryptjs": "^3.0.3",
     "canvas": "^3.2.3",
     "cloudinary": "^1.41.3",
+    "compromise": "^14.10.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
@@ -34,8 +36,10 @@
     "morgan": "^1.10.1",
     "multer": "^2.1.1",
     "multer-storage-cloudinary": "^4.0.0",
+    "natural": "^6.10.0",
     "nodemailer": "^8.0.2",
     "resend": "^4.8.0",
+    "stopword": "^2.0.8",
     "zod": "^4.3.6"
   },
   "devDependencies": {

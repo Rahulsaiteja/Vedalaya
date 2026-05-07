@@ -1,66 +1,13 @@
 import express from 'express';
 import { z } from 'zod';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import axios from 'axios';
 
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { generateQuizFromText } from '../utils/simpleGenerators.js';
+import { generateFlashcards, isMLModelAvailable } from '../utils/mlFlashcardGenerator.js';
 
 const router = express.Router();
-
-// Simple local flashcard generator as fallback
-function generateFlashcardsLocally(text, maxCards = 12) {
-  const sentences = text
-    .split(/[.!?]+/)
-    .map(s => s.trim())
-    .filter(s => s.length > 20 && s.length < 200);
-  
-  const cards = [];
-  const keywords = ['what', 'who', 'when', 'where', 'why', 'how', 'define', 'explain'];
-  
-  for (let i = 0; i < Math.min(sentences.length, maxCards); i++) {
-    const sentence = sentences[i];
-    const words = sentence.split(' ');
-    
-    if (words.length < 5) continue;
-    
-    // Extract key concept (usually a noun or important term)
-    const importantWords = words.filter(w => 
-      w.length > 4 && 
-      /^[A-Z]/.test(w) && 
-      !['The', 'This', 'That', 'These', 'Those'].includes(w)
-    );
-    
-    if (importantWords.length > 0) {
-      const concept = importantWords[0];
-      cards.push({
-        front: `What is ${concept}?`,
-        back: sentence
-      });
-    } else {
-      // Generic question
-      const keyword = keywords[i % keywords.length];
-      cards.push({
-        front: `${keyword.charAt(0).toUpperCase() + keyword.slice(1)} - ${words.slice(0, 5).join(' ')}...?`,
-        back: sentence
-      });
-    }
-    
-    if (cards.length >= maxCards) break;
-  }
-  
-  // If we couldn't generate enough cards, create some basic ones
-  if (cards.length === 0) {
-    const chunks = text.match(/.{1,150}/g) || [];
-    for (let i = 0; i < Math.min(chunks.length, maxCards); i++) {
-      cards.push({
-        front: `Key Point ${i + 1}`,
-        back: chunks[i].trim()
-      });
-    }
-  }
-  
-  return cards;
-}
 
 const quizGenSchema = z.object({
   text: z.string().min(20),
@@ -89,15 +36,43 @@ router.post('/flashcards', requireAuth, requireRole('student'), async (req, res,
     const maxCards = data.maxCards ?? 12;
 
     let cards = [];
-    let source = 'local';
+    let source = 'hf-space';
 
-    // Try Gemini first (with lighter, cheaper model)
-    if (process.env.GEMINI_API_KEY) {
+    // Try Hugging Face Space first (best quality, free, no limits)
+    if (process.env.HF_FLASHCARD_SPACE_URL) {
       try {
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-8b" }); // Cheaper model
+        console.log('🤗 Using Hugging Face Space for flashcard generation');
+        const response = await axios.post(
+          `${process.env.HF_FLASHCARD_SPACE_URL}/api/predict`,
+          {
+            data: [data.text, maxCards]
+          },
+          { timeout: 30000 } // 30 second timeout
+        );
         
-        const prompt = `You are a helpful educational assistant. Based on the provided text, generate up to ${maxCards} flashcards. 
+        if (response.data?.data?.[1]?.cards) {
+          cards = response.data.data[1].cards;
+          source = 'hf-space';
+        } else {
+          throw new Error('Invalid response from HF Space');
+        }
+      } catch (hfError) {
+        console.error('HF Space error:', hfError.message);
+        
+        // Fallback to ML model if available
+        try {
+          cards = await generateFlashcards(data.text, maxCards, true);
+          source = isMLModelAvailable() ? 'ml' : 'rule-based';
+        } catch (mlError) {
+          console.error('ML generation also failed:', mlError.message);
+          
+          // Final fallback to Gemini API
+          if (process.env.GEMINI_API_KEY) {
+            try {
+              const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+              const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-8b" });
+              
+              const prompt = `You are a helpful educational assistant. Based on the provided text, generate up to ${maxCards} flashcards. 
 Extract the most important concepts, facts, or definitions. 
 Return the output STRICTLY in a valid JSON array format, where each object has "front" (the question or prompt) and "back" (the answer or explanation). Do NOT output any markdown blocks like \`\`\`json. Only output the raw JSON array.
 Example: [{"front": "What is the capital of France?", "back": "Paris"}]
@@ -106,42 +81,47 @@ Text:
 ${data.text}
 `;
 
-        const result = await model.generateContent(prompt);
-        const responseText = await result.response.text();
-        
-        try {
-          const cleanedText = responseText.replace(/```json\n?|```/gi, '').trim();
-          cards = JSON.parse(cleanedText);
-          source = 'gemini';
-        } catch (e) {
-          console.error("Failed to parse Gemini response, using local fallback");
-          cards = generateFlashcardsLocally(data.text, maxCards);
+              const result = await model.generateContent(prompt);
+              const responseText = await result.response.text();
+              
+              const cleanedText = responseText.replace(/```json\n?|```/gi, '').trim();
+              cards = JSON.parse(cleanedText);
+              source = 'gemini';
+            } catch (geminiError) {
+              console.error('All methods failed, using rule-based fallback');
+              cards = await generateFlashcards(data.text, maxCards, false);
+              source = 'rule-based-fallback';
+            }
+          } else {
+            cards = await generateFlashcards(data.text, maxCards, false);
+            source = 'rule-based-fallback';
+          }
         }
-      } catch (error) {
-        const isQuotaError = 
-          error?.status === 429 ||
-          /quota|rate limit|too many requests/i.test(error?.message || '');
-        
-        if (isQuotaError) {
-          console.log("Gemini quota exceeded, using local generation");
-        } else {
-          console.error("Gemini error:", error.message);
-        }
-        
-        // Use local fallback
-        cards = generateFlashcardsLocally(data.text, maxCards);
       }
     } else {
-      // No API key, use local generation
-      cards = generateFlashcardsLocally(data.text, maxCards);
+      // No HF Space URL, try ML model
+      try {
+        cards = await generateFlashcards(data.text, maxCards, true);
+        source = isMLModelAvailable() ? 'ml' : 'rule-based';
+      } catch (error) {
+        console.error('ML generation failed:', error.message);
+        cards = await generateFlashcards(data.text, maxCards, false);
+        source = 'rule-based';
+      }
     }
 
     // Ensure we have valid cards
     if (!Array.isArray(cards) || cards.length === 0) {
-      cards = generateFlashcardsLocally(data.text, maxCards);
+      cards = await generateFlashcards(data.text, maxCards, false);
+      source = 'rule-based-emergency';
     }
 
-    return res.json({ cards, source });
+    return res.json({ 
+      cards, 
+      source, 
+      mlAvailable: isMLModelAvailable(),
+      hfSpaceAvailable: !!process.env.HF_FLASHCARD_SPACE_URL
+    });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: { message: err.message } });
     return next(err);

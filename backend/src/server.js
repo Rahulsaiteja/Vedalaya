@@ -9,6 +9,7 @@ import chatbotRoute from './routes/chatbot.js';
 import { connectDb } from './utils/connectDb.js';
 import { env } from './utils/env.js';
 import { notFoundHandler, errorHandler } from './middleware/errors.js';
+import { loadFlashcardModel } from './utils/mlFlashcardGenerator.js';
 
 import authRoutes from './routes/auth.js';
 import quizRoutes from './routes/quizzes.js';
@@ -66,7 +67,14 @@ app.use('/api/chatbot', chatbotRoute);
 app.use(notFoundHandler);
 app.use(errorHandler);
 
+// Initialize
 await connectDb(env.MONGODB_URI);
+
+// Load ML model (non-blocking, will use fallback if fails)
+loadFlashcardModel().catch(err => {
+  console.log('⚠️  ML model not available, using rule-based fallback');
+});
+
 app.listen(env.PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`API listening on http://localhost:${env.PORT}`);
