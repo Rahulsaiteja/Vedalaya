@@ -12,6 +12,7 @@ import os
 import json
 import cloudinary
 import cloudinary.uploader
+import storage
 from dotenv import load_dotenv
 
 # Load credentials from backend/.env
@@ -25,7 +26,7 @@ cloudinary.config(
 )
 
 BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH       = os.path.join(BASE_DIR, 'custom_face_model_v2.h5')
+MODEL_PATH       = os.path.join(BASE_DIR, 'custom_face_model_v2.keras')
 CLASS_NAMES_PATH = os.path.join(BASE_DIR, 'class_names.json')
 
 def main():
@@ -42,24 +43,12 @@ def main():
         classes = json.load(f)
     print(f"Classes: {classes}")
 
-    print("Uploading model to Cloudinary...")
-    result = cloudinary.uploader.upload(
-        MODEL_PATH,
-        public_id="vedalaya_model/custom_face_model_v2",
-        resource_type="raw",
-        overwrite=True,
-    )
-    print(f"✓ Model uploaded: {result['secure_url']}")
-
-    print("Uploading class names...")
-    class_json = json.dumps(classes).encode("utf-8")
-    result2 = cloudinary.uploader.upload(
-        class_json,
-        public_id="vedalaya_model/class_names",
-        resource_type="raw",
-        overwrite=True,
-    )
-    print(f"✓ Class names uploaded: {result2['secure_url']}")
+    print("Uploading model and class names to Cloudinary in chunks...")
+    success = storage.upload_model(MODEL_PATH, classes)
+    if success:
+        print("[OK] Model and class names uploaded successfully.")
+    else:
+        print("[ERROR] Failed to upload model.")
     print("\nDone! The deployed ML service will download this model on next startup.")
     print("Trigger a redeploy on Render or hit POST /reload-model to load it now.")
 

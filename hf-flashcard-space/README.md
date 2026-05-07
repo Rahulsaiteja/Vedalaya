@@ -1,10 +1,10 @@
 ---
 title: Flashcard Generator
 emoji: 🎴
-colorFrom: emerald
-colorTo: green
+colorFrom: green
+colorTo: blue
 sdk: gradio
-sdk_version: 4.19.2
+sdk_version: 5.9.1
 app_file: app.py
 pinned: false
 license: mit

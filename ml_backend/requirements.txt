@@ -9,3 +9,4 @@ scikit-learn
 requests
 gunicorn
 cloudinary
+tf_keras

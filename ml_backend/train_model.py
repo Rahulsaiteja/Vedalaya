@@ -1,40 +1,36 @@
 import os
+os.environ["TF_USE_LEGACY_KERAS"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 import cv2
 import numpy as np
 import urllib.request
-
-import os
+import shutil
+import json
 
 import tensorflow as tf
 from tensorflow.keras import layers, models, callbacks
-from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.applications import EfficientNetB0
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
-import json
+from sklearn.utils.class_weight import compute_class_weight
 
-BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
-
-# DATA_DIR points to Render persistent disk in production (/app/data)
-# Falls back to the app directory for local development
-DATA_DIR  = os.environ.get('DATA_DIR', BASE_DIR)
-
+BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR    = os.environ.get("DATA_DIR", BASE_DIR)
 DATASET_DIR = os.path.join(DATA_DIR, "dataset")
-IMG_SIZE    = 160
-BATCH_SIZE  = 32
-EPOCHS      = 30
+IMG_SIZE    = 224
+BATCH_SIZE  = 16   # smaller batch = more gradient updates per epoch, better for small datasets
+EPOCHS      = 50
 
-# Ensure data dir exists
 os.makedirs(DATASET_DIR, exist_ok=True)
 
-# ── DNN Face Detector ────────────────────────────────────────────────────────
-DNN_PROTOTXT   = os.path.join(BASE_DIR, "deploy.prototxt")
-DNN_CAFFEMODEL = os.path.join(BASE_DIR, "res10_300x300_ssd_iter_140000.caffemodel")
-_PROTOTXT_URL  = "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt"
+# ── DNN Face Detector ─────────────────────────────────────────────────────────
+DNN_PROTOTXT    = os.path.join(BASE_DIR, "deploy.prototxt")
+DNN_CAFFEMODEL  = os.path.join(BASE_DIR, "res10_300x300_ssd_iter_140000.caffemodel")
+_PROTOTXT_URL   = "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt"
 _CAFFEMODEL_URL = "https://github.com/opencv/opencv_3rdparty/raw/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel"
-
-# Haar cascade kept as fallback
-CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
+face_cascade    = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 
 def _download_dnn_files():
     for path, url in [(DNN_PROTOTXT, _PROTOTXT_URL), (DNN_CAFFEMODEL, _CAFFEMODEL_URL)]:
@@ -42,234 +38,271 @@ def _download_dnn_files():
             print(f"Downloading {path} ...")
             try:
                 urllib.request.urlretrieve(url, path)
-                print(f"  ✓ {path} downloaded.")
+                print(f"  ✓ Downloaded.")
             except Exception as e:
-                print(f"  ✗ Failed to download {path}: {e}")
+                print(f"  ✗ Failed: {e}")
 
 _download_dnn_files()
 dnn_net = None
 if os.path.exists(DNN_PROTOTXT) and os.path.exists(DNN_CAFFEMODEL):
     dnn_net = cv2.dnn.readNetFromCaffe(DNN_PROTOTXT, DNN_CAFFEMODEL)
-    print("DNN face detector loaded for training.")
+    print("DNN face detector loaded.")
 else:
-    print("DNN files missing — using Haar cascade for training.")
+    print("DNN files missing — using Haar cascade.")
 
 
-def crop_face(img_bgr, padding=0.25):
-    """Detect the largest face using DNN detector (Haar fallback). Returns padded crop or None."""
-    h, w = img_bgr.shape[:2]
+# ── Face alignment using eye landmarks ───────────────────────────────────────
+eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
 
-    if dnn_net is not None:
-        blob = cv2.dnn.blobFromImage(cv2.resize(img_bgr, (300, 300)), 1.0,
-                                      (300, 300), (104.0, 177.0, 123.0))
-        dnn_net.setInput(blob)
-        detections = dnn_net.forward()
+def align_face(face_bgr):
+    """
+    Align face by rotating so eyes are horizontal.
+    Returns aligned face or original if eyes not detected.
+    """
+    gray = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2GRAY)
+    eyes = eye_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(20, 20))
+    if len(eyes) < 2:
+        return face_bgr  # can't align, return as-is
 
-        best_conf, best_box = 0, None
-        for i in range(detections.shape[2]):
-            conf = detections[0, 0, i, 2]
-            if conf > best_conf:
-                best_conf = conf
-                best_box  = detections[0, 0, i, 3:7]
+    # Sort eyes left to right
+    eyes = sorted(eyes, key=lambda e: e[0])
+    (x1, y1, w1, h1) = eyes[0]
+    (x2, y2, w2, h2) = eyes[1]
 
-        if best_box is None or best_conf < 0.5:
-            return None
+    # Center of each eye
+    eye1_center = (x1 + w1 // 2, y1 + h1 // 2)
+    eye2_center = (x2 + w2 // 2, y2 + h2 // 2)
 
-        box = best_box * np.array([w, h, w, h])
-        x1, y1, x2, y2 = box.astype(int)
-    else:
-        # Haar fallback
-        gray  = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-        if len(faces) == 0:
-            return None
-        x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])
-        x1, y1, x2, y2 = x, y, x + fw, y + fh
+    # Angle between eyes
+    dy = eye2_center[1] - eye1_center[1]
+    dx = eye2_center[0] - eye1_center[0]
+    angle = np.degrees(np.arctan2(dy, dx))
 
-    pad_x = int((x2 - x1) * padding)
-    pad_y = int((y2 - y1) * padding)
-    x1 = max(0, x1 - pad_x)
-    y1 = max(0, y1 - pad_y)
-    x2 = min(w, x2 + pad_x)
-    y2 = min(h, y2 + pad_y)
-    return img_bgr[y1:y2, x1:x2]
+    # Rotate around midpoint between eyes
+    mid = (float((eye1_center[0] + eye2_center[0]) // 2),
+           float((eye1_center[1] + eye2_center[1]) // 2))
+    h, w = face_bgr.shape[:2]
+    M = cv2.getRotationMatrix2D(mid, angle, 1.0)
+    aligned = cv2.warpAffine(face_bgr, M, (w, h), flags=cv2.INTER_CUBIC)
+    return aligned
+
+
+def apply_clahe(img_bgr):
+    """Apply CLAHE to normalize lighting — must be applied consistently at train AND predict time."""
+    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+    return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
+
+
+def preprocess_face(img_bgr):
+    """
+    Full preprocessing pipeline — must match app.py predict() exactly:
+    1. CLAHE lighting normalization
+    2. Face alignment
+    3. Resize to IMG_SIZE
+    4. Convert to RGB float32
+    """
+    img_bgr = apply_clahe(img_bgr)
+    img_bgr = align_face(img_bgr)
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    img_rgb = cv2.resize(img_rgb, (IMG_SIZE, IMG_SIZE))
+    return img_rgb.astype(np.float32)
 
 
 def load_data():
+    """
+    Load face images from dataset directory.
+    Images are already face crops saved by /register-face.
+    Apply full preprocessing pipeline consistently.
+    """
     X, y, classes = [], [], []
 
     if not os.path.exists(DATASET_DIR):
         print(f"Dataset directory '{DATASET_DIR}' not found.")
         return np.array(X), np.array(y), classes
 
-    for idx, person_name in enumerate(sorted(os.listdir(DATASET_DIR))):
-        person_dir = os.path.join(DATASET_DIR, person_name)
-        if not os.path.isdir(person_dir):
-            continue
+    person_dirs = sorted([
+        d for d in os.listdir(DATASET_DIR)
+        if os.path.isdir(os.path.join(DATASET_DIR, d))
+    ])
 
+    for idx, person_name in enumerate(person_dirs):
+        person_dir = os.path.join(DATASET_DIR, person_name)
         classes.append(person_name)
         loaded = skipped = 0
 
         for img_name in os.listdir(person_dir):
-            if not img_name.lower().endswith(('.png', '.jpg', '.jpeg')):
+            if not img_name.lower().endswith((".png", ".jpg", ".jpeg")):
                 continue
             img_bgr = cv2.imread(os.path.join(person_dir, img_name))
             if img_bgr is None:
-                continue
-
-            face = crop_face(img_bgr)
-            if face is None:
                 skipped += 1
                 continue
 
-            face_rgb = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
-            face_rgb = cv2.resize(face_rgb, (IMG_SIZE, IMG_SIZE))
-            X.append(face_rgb)
-            y.append(idx)
-            loaded += 1
+            try:
+                face = preprocess_face(img_bgr)
+                X.append(face)
+                y.append(idx)
+                loaded += 1
+            except Exception as e:
+                skipped += 1
 
-        print(f"  {person_name:<20}: {loaded} loaded, {skipped} skipped (no face)")
+        print(f"  {person_name:<25}: {loaded} loaded, {skipped} skipped")
 
     return np.array(X), np.array(y), classes
 
 
 def build_augmentation():
+    """
+    Augmentation without RandomBrightness — that layer internally uses a
+    Normalization sublayer which saves without weights and crashes on reload.
+    Brightness variation is handled instead by RandomContrast which is safe.
+    """
     return models.Sequential([
         layers.RandomFlip("horizontal"),
-        layers.RandomRotation(0.15),        # more rotation variety
-        layers.RandomZoom(0.15),            # more zoom variety
-        layers.RandomBrightness(0.3),       # handle lighting changes
-        layers.RandomContrast(0.3),         # handle contrast changes
-        layers.RandomTranslation(0.1, 0.1), # slight position shifts
+        layers.RandomRotation(0.1),
+        layers.RandomZoom(0.15),
+        layers.RandomContrast(0.4),
+        layers.RandomTranslation(0.1, 0.1),
     ], name="augmentation")
 
 
 def build_model(num_classes):
-    """
-    MobileNetV2 Transfer Learning:
-      - Base: MobileNetV2 pretrained on ImageNet (frozen initially)
-      - Top:  Custom classifier head for our people
-      - Fine-tune: Unfreeze top 30 layers of base after initial training
-    """
-    # Pretrained base — no top classifier, frozen weights
-    base = MobileNetV2(
+    base_model = EfficientNetB0(
         input_shape=(IMG_SIZE, IMG_SIZE, 3),
         include_top=False,
-        weights="imagenet"
+        weights="imagenet",
     )
-    base.trainable = False   # freeze all base layers first
+    base_model.trainable = False
 
-    inputs = tf.keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
+    inputs = layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
     x = build_augmentation()(inputs)
-
-    # Preprocessing is now done OUTSIDE the model (before prediction)
-    # so the model can be loaded on any TF version without TrueDivide errors
-    x = base(x, training=False)
+    x = base_model(x, training=False)
     x = layers.GlobalAveragePooling2D()(x)
-    x = layers.Dense(256, activation='relu')(x)
+    x = layers.BatchNormalization()(x)          # stabilizes training
+    x = layers.Dense(512, activation="relu")(x) # larger head for more capacity
     x = layers.Dropout(0.4)(x)
-    outputs = layers.Dense(num_classes, activation='softmax')(x)
+    x = layers.Dense(256, activation="relu")(x)
+    x = layers.Dropout(0.3)(x)
+    outputs = layers.Dense(num_classes, activation="softmax")(x)
 
-    model = tf.keras.Model(inputs, outputs)
+    model = models.Model(inputs, outputs)
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-        # Label smoothing forces the model to be more confident and
-        # discriminative — reduces overconfident wrong predictions
-        loss=tf.keras.losses.CategoricalCrossentropy(
-            from_logits=False, label_smoothing=0.1
-        ),
-        metrics=['accuracy']
+        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
+        loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),
+        metrics=["accuracy"],
     )
-    return model, base
+    return model, base_model
 
 
 def main():
-    print("=" * 55)
-    print("  Face Recognition  —  MobileNetV2 Transfer Learning")
-    print("=" * 55)
+    print("=" * 60)
+    print("  Face Recognition — EfficientNetB0 Transfer Learning")
+    print("=" * 60)
 
-    # [1] Load
-    print("\n[1/5] Loading dataset and cropping faces...")
+    print("\n[1/5] Loading and preprocessing dataset...")
     X, y, classes = load_data()
 
     if len(X) == 0:
-        print("No face crops found. Check your dataset folder.")
+        print("No images found. Check dataset folder.")
         return
 
-    print(f"\n  Total face crops : {len(X)}")
-    print(f"  People ({len(classes)})       : {classes}")
+    num_classes = len(classes)
+    print(f"\n  Total images  : {len(X)}")
+    print(f"  People ({num_classes})    : {classes}")
 
-    with open(os.path.join(DATA_DIR, 'class_names.json'), 'w') as f:
+    if num_classes < 2:
+        print("Need at least 2 people to train. Register more students.")
+        return
+
+    # Check minimum images per person
+    for i, name in enumerate(classes):
+        count = np.sum(np.array(y) == i)
+        if count < 30:
+            print(f"  WARNING: {name} has only {count} images. Recommend 50+.")
+
+    with open(os.path.join(DATA_DIR, "class_names.json"), "w") as f:
         json.dump(classes, f)
     print("  class_names.json saved.")
 
-    # [2] Split
-    print("\n[2/5] Splitting 80/20 train/val...")
+    print("\n[2/5] Splitting 80/20 train/val (stratified)...")
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
     print(f"  Train: {len(X_train)} | Val: {len(X_val)}")
 
-    # [3] Build
-    print("\n[3/5] Building MobileNetV2 model...")
-    model, base = build_model(len(classes))
-    model.summary()
+    X_train = X_train.astype(np.float32)
+    X_val   = X_val.astype(np.float32)
 
-    # [4a] Phase 1 — train only the new head (base frozen)
+    class_weights_arr = compute_class_weight(
+        class_weight="balanced", classes=np.unique(y_train), y=y_train
+    )
+    class_weight_dict = dict(enumerate(class_weights_arr))
+    print(f"  Class weights: { {classes[i]: round(w, 2) for i, w in class_weight_dict.items()} }")
+
+    y_train_oh = tf.keras.utils.to_categorical(y_train, num_classes=num_classes)
+    y_val_oh   = tf.keras.utils.to_categorical(y_val,   num_classes=num_classes)
+
+    print("\n[3/5] Building EfficientNetB0 model...")
+    model, base = build_model(num_classes)
+
+    best_model_path = os.path.join(DATA_DIR, "custom_face_model_v2.keras")
+    p2_temp_path    = os.path.join(DATA_DIR, "custom_face_model_v2_p2temp.keras")
+
+    # ── Phase 1: Train head only ──────────────────────────────────────────────
     print("\n[4/5] Phase 1: Training classifier head (base frozen)...")
     cb_phase1 = [
         callbacks.ModelCheckpoint(
-            os.path.join(DATA_DIR, "custom_face_model_v2.keras"),
-            monitor="val_accuracy", save_best_only=True, verbose=1
+            best_model_path, monitor="val_accuracy",
+            save_best_only=True, verbose=1
         ),
         callbacks.EarlyStopping(
-            monitor="val_accuracy", patience=6, verbose=1
+            monitor="val_accuracy", patience=8,
+            restore_best_weights=True, verbose=1
         ),
         callbacks.ReduceLROnPlateau(
-            monitor="val_loss", factor=0.5, patience=3,
+            monitor="val_loss", factor=0.5, patience=4,
             min_lr=1e-6, verbose=1
         ),
     ]
 
-    # One-hot encode for label smoothing loss
-    y_train_oh = tf.keras.utils.to_categorical(y_train, num_classes=len(classes))
-    y_val_oh   = tf.keras.utils.to_categorical(y_val,   num_classes=len(classes))
-
     history1 = model.fit(
         X_train, y_train_oh,
-        epochs=15,
+        epochs=25,
         batch_size=BATCH_SIZE,
         validation_data=(X_val, y_val_oh),
-        callbacks=cb_phase1
+        class_weight=class_weight_dict,
+        callbacks=cb_phase1,
     )
+    best_p1_acc = max(history1.history["val_accuracy"])
+    print(f"\n  Phase 1 best val_accuracy: {best_p1_acc:.4f}")
 
-    # [4b] Phase 2 — unfreeze top 30 layers and fine-tune
-    print("\n[5/5] Phase 2: Fine-tuning top layers of MobileNetV2...")
+    # ── Phase 2: Fine-tune top layers ─────────────────────────────────────────
+    print("\n[5/5] Phase 2: Fine-tuning top 80 layers of EfficientNetB0...")
     base.trainable = True
-    # Unfreeze top 50 layers for better fine-grained face feature learning
-    for layer in base.layers[:-50]:
+    for layer in base.layers[:-80]:
         layer.trainable = False
 
-    # Recompile with a much lower LR for fine-tuning
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5),
-        loss=tf.keras.losses.CategoricalCrossentropy(
-            from_logits=False, label_smoothing=0.1
-        ),
-        metrics=['accuracy']
+        optimizer=tf.keras.optimizers.Adam(learning_rate=5e-6),  # very low LR
+        loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),
+        metrics=["accuracy"],
     )
 
     cb_phase2 = [
         callbacks.ModelCheckpoint(
-            os.path.join(DATA_DIR, "custom_face_model_v2.keras"),
-            monitor="val_accuracy", save_best_only=True, verbose=1
+            p2_temp_path, monitor="val_accuracy",
+            save_best_only=True, verbose=1
         ),
         callbacks.EarlyStopping(
-            monitor="val_accuracy", patience=8, verbose=1
+            monitor="val_accuracy", patience=10,
+            restore_best_weights=True, verbose=1
         ),
         callbacks.ReduceLROnPlateau(
-            monitor="val_loss", factor=0.5, patience=4,
-            min_lr=1e-7, verbose=1
+            monitor="val_loss", factor=0.5, patience=5,
+            min_lr=1e-8, verbose=1
         ),
     ]
 
@@ -278,28 +311,72 @@ def main():
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
         validation_data=(X_val, y_val_oh),
-        callbacks=cb_phase2
+        class_weight=class_weight_dict,
+        callbacks=cb_phase2,
     )
+    best_p2_acc = max(history2.history["val_accuracy"]) if history2.history["val_accuracy"] else 0
+    print(f"\n  Phase 2 best val_accuracy: {best_p2_acc:.4f}")
 
-    # Combine histories for final best accuracy
-    all_val_acc = (
-        history1.history['val_accuracy'] +
-        history2.history['val_accuracy']
-    )
+    if best_p2_acc > best_p1_acc:
+        print(f"  Phase 2 improved — using Phase 2 model.")
+        shutil.copy2(p2_temp_path, best_model_path)
+    else:
+        print(f"  Phase 2 did not improve — keeping Phase 1 model.")
+    if os.path.exists(p2_temp_path):
+        os.remove(p2_temp_path)
 
-    # Report
-    print("\n" + "=" * 55)
+    # ── Final report ──────────────────────────────────────────────────────────
+    print("\n" + "=" * 60)
     print("  Per-Person Accuracy Report")
-    print("=" * 55)
-    model  = tf.keras.models.load_model(os.path.join(DATA_DIR, "custom_face_model_v2.keras"))
-    y_pred = np.argmax(model.predict(X_val), axis=1)
-    y_val_labels = np.argmax(y_val_oh, axis=1)
-    print(classification_report(y_val_labels, y_pred,
-                                 target_names=classes, zero_division=0))
+    print("=" * 60)
+    final_model = tf.keras.models.load_model(best_model_path)
+    y_pred      = np.argmax(final_model.predict(X_val, verbose=0), axis=1)
+    y_true      = np.argmax(y_val_oh, axis=1)
+    print(classification_report(y_true, y_pred, target_names=classes, zero_division=0))
 
-    best_acc = max(all_val_acc) * 100
+    # ── Save inference-only model (no augmentation layers) ───────────────────
+    # Augmentation layers (RandomBrightness etc.) contain Normalization sublayers
+    # that require adapted weights. Stripping them avoids load errors at inference time.
+    print("\n  Building inference-only model (augmentation stripped)...")
+    try:
+        # Find the layer after augmentation (first non-augmentation layer)
+        aug_layer_names = {"augmentation", "random_flip", "random_rotation",
+                           "random_zoom", "random_brightness", "random_contrast",
+                           "random_translation"}
+        # Build inference model: Input → skip augmentation → rest of layers
+        inf_input = final_model.input
+        # Get the augmentation layer output to find what comes after it
+        aug_layer = None
+        for layer in final_model.layers:
+            if layer.name == "augmentation" or any(n in layer.name for n in aug_layer_names):
+                if hasattr(layer, 'layers'):  # it's a Sequential augmentation block
+                    aug_layer = layer
+                    break
+
+        if aug_layer is not None:
+            # Reconnect: pass input directly to the layer after augmentation
+            x = inf_input
+            skip_aug = True
+            for layer in final_model.layers[1:]:  # skip Input layer
+                if layer == aug_layer:
+                    skip_aug = False
+                    continue
+                if skip_aug:
+                    continue
+                x = layer(x)
+            inference_model = tf.keras.Model(inputs=inf_input, outputs=x)
+            inference_model.save(best_model_path)
+            print("  Inference-only model saved (augmentation stripped).")
+        else:
+            print("  No augmentation layer found — model saved as-is.")
+    except Exception as strip_err:
+        print(f"  Could not strip augmentation ({strip_err}) — model saved with augmentation.")
+
+    best_acc = max(
+        history1.history["val_accuracy"] + history2.history["val_accuracy"]
+    ) * 100
     print(f"\n[OK] Best Validation Accuracy : {best_acc:.2f}%")
-    print("[OK] Best model saved         : custom_face_model.keras")
+    print(f"[OK] Model saved              : {best_model_path}")
     print("[OK] Class names saved        : class_names.json")
 
 

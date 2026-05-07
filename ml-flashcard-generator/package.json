@@ -9,7 +9,7 @@
     "prepare-data": "node prepare-data.js"
   },
   "dependencies": {
-    "@tensorflow/tfjs-node": "^4.17.0",
+    "@tensorflow/tfjs": "^4.17.0",
     "compromise": "^14.10.0",
     "natural": "^6.10.0",
     "stopword": "^2.0.8"

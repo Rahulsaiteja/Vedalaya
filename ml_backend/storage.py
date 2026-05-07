@@ -29,6 +29,7 @@ cloudinary.config(
 FACES_FOLDER = "vedalaya_faces"
 MODEL_FOLDER = "vedalaya_model"
 MODEL_PUBLIC_ID = f"{MODEL_FOLDER}/custom_face_model_v2"
+MODEL_H5_PUBLIC_ID = f"{MODEL_FOLDER}/custom_face_model_deploy"
 CLASSES_PUBLIC_ID = f"{MODEL_FOLDER}/class_names"
 
 
@@ -136,26 +137,45 @@ def count_faces_for_student(student_name):
 # ── Model storage ─────────────────────────────────────────────────────────────
 
 def upload_model(model_path, class_names):
-    """Upload trained model .keras (chunked) and class_names list to Cloudinary."""
+    """Upload trained model (.h5 or .keras, chunked) and class_names list to Cloudinary."""
     if not is_configured():
         print("Cloudinary not configured — model not uploaded.")
         return False
     try:
+        # Use different public ID for .h5 vs .keras so both can coexist
+        is_h5 = model_path.endswith('.h5')
+        pub_id = MODEL_H5_PUBLIC_ID if is_h5 else MODEL_PUBLIC_ID
+
         # Split model into 9MB chunks to bypass 10MB raw limit
         CHUNK_SIZE = 9 * 1024 * 1024
         with open(model_path, "rb") as f:
             data = f.read()
-        
+
         chunks = [data[i:i + CHUNK_SIZE] for i in range(0, len(data), CHUNK_SIZE)]
-        
+
         for i, chunk in enumerate(chunks):
             cloudinary.uploader.upload(
                 chunk,
-                public_id=f"{MODEL_PUBLIC_ID}_part{i}",
+                public_id=f"{pub_id}_part{i}",
                 resource_type="raw",
                 overwrite=True,
             )
             print(f"Model part {i} uploaded to Cloudinary.")
+
+        # Delete stale parts from previous upload
+        stale_part = len(chunks)
+        for _ in range(200):
+            try:
+                res = cloudinary.uploader.destroy(
+                    f"{pub_id}_part{stale_part}",
+                    resource_type="raw"
+                )
+                if res.get('result') == 'not found':
+                    break
+                print(f"Deleted stale model part {stale_part}.")
+                stale_part += 1
+            except Exception:
+                break
 
         # Upload class names as JSON raw file
         class_json = json.dumps(class_names).encode("utf-8")
@@ -174,19 +194,27 @@ def upload_model(model_path, class_names):
 
 def download_model(local_model_path, local_classes_path):
     """
-    Download model .keras (recombining chunks) and class_names.json from Cloudinary to local paths.
+    Download model from Cloudinary to local paths.
+    Tries .h5 (clean) first, falls back to .keras (broken normalization).
     Returns True if both files were downloaded successfully.
     """
     if not is_configured():
         print("Cloudinary not configured — skipping model download.")
         return False
     try:
-        # Recombine model chunks
+        # Try .h5 first (clean, no normalization issues)
+        h5_local = local_model_path.replace('.keras', '.h5')
+        if not h5_local.endswith('.h5'):
+            h5_local = local_model_path + '.h5'
+
+        downloaded_h5 = False
         model_data = bytearray()
         part = 0
         while True:
             try:
-                part_info = cloudinary.api.resource(f"{MODEL_PUBLIC_ID}_part{part}", resource_type="raw")
+                part_info = cloudinary.api.resource(
+                    f"{MODEL_H5_PUBLIC_ID}_part{part}", resource_type="raw"
+                )
                 resp = requests.get(part_info["secure_url"], timeout=120)
                 if resp.status_code == 200:
                     model_data.extend(resp.content)
@@ -195,14 +223,38 @@ def download_model(local_model_path, local_classes_path):
                     break
             except cloudinary.exceptions.NotFound:
                 break
-        
-        if part == 0:
-            print("No model parts found on Cloudinary yet — needs training first.")
-            return False
 
-        with open(local_model_path, "wb") as f:
-            f.write(model_data)
-        print(f"Model downloaded (recombined {part} parts) → {local_model_path}")
+        if part > 0:
+            with open(h5_local, "wb") as f:
+                f.write(model_data)
+            print(f"Clean .h5 model downloaded ({part} parts) → {h5_local}")
+            downloaded_h5 = True
+        else:
+            # Fall back to .keras
+            print("No .h5 model on Cloudinary — trying .keras...")
+            model_data = bytearray()
+            part = 0
+            while True:
+                try:
+                    part_info = cloudinary.api.resource(
+                        f"{MODEL_PUBLIC_ID}_part{part}", resource_type="raw"
+                    )
+                    resp = requests.get(part_info["secure_url"], timeout=120)
+                    if resp.status_code == 200:
+                        model_data.extend(resp.content)
+                        part += 1
+                    else:
+                        break
+                except cloudinary.exceptions.NotFound:
+                    break
+
+            if part == 0:
+                print("No model parts found on Cloudinary yet — needs training first.")
+                return False
+
+            with open(local_model_path, "wb") as f:
+                f.write(model_data)
+            print(f".keras model downloaded ({part} parts) → {local_model_path}")
 
         # Download class names
         classes_info = cloudinary.api.resource(CLASSES_PUBLIC_ID, resource_type="raw")
@@ -212,9 +264,9 @@ def download_model(local_model_path, local_classes_path):
             return False
         with open(local_classes_path, "wb") as f:
             f.write(resp.content)
-        print(f"Class names downloaded from Cloudinary → {local_classes_path}")
-
+        print(f"Class names downloaded → {local_classes_path}")
         return True
+
     except cloudinary.exceptions.NotFound:
         print("Classes file not found on Cloudinary.")
         return False

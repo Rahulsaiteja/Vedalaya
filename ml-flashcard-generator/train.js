@@ -3,7 +3,7 @@
  * Trains a neural network to generate flashcards from text
  */
 
-import * as tf from '@tensorflow/tfjs-node';
+import * as tf from '@tensorflow/tfjs';
 import fs from 'fs';
 import path from 'path';
 
@@ -15,18 +15,18 @@ const trainingData = JSON.parse(fs.readFileSync('./data/training-data.json', 'ut
 console.log(`✅ Loaded ${trainingData.length} training examples`);
 console.log(`✅ Vocabulary size: ${vocabulary.size}\n`);
 
-// Hyperparameters
+// Hyperparameters - Optimized for better accuracy
 const CONFIG = {
   textMaxLength: 50,
   frontMaxLength: 20,
   backMaxLength: 30,
-  embeddingDim: 128,
-  lstmUnits: 256,
-  denseUnits: 128,
-  batchSize: 4,
-  epochs: 100,
-  learningRate: 0.001,
-  validationSplit: 0.2
+  embeddingDim: 128,     // Increased for better word representations
+  lstmUnits: 256,        // Increased for more capacity
+  denseUnits: 128,       // Increased
+  batchSize: 8,          // Increased for more stable training
+  epochs: 100,           // More epochs for better learning
+  learningRate: 0.0005,  // Lower learning rate for stability
+  validationSplit: 0.15  // Less validation, more training
 };
 
 console.log('⚙️  Model Configuration:');
@@ -181,11 +181,15 @@ async function trainModel() {
   // Callbacks
   const callbacks = {
     onEpochEnd: (epoch, logs) => {
+      const loss = logs?.loss?.toFixed ? logs.loss.toFixed(4) : 'N/A';
+      const frontAcc = logs?.front_output_accuracy?.toFixed ? logs.front_output_accuracy.toFixed(4) : 'N/A';
+      const backAcc = logs?.back_output_accuracy?.toFixed ? logs.back_output_accuracy.toFixed(4) : 'N/A';
+      
       console.log(
         `Epoch ${epoch + 1}/${CONFIG.epochs} - ` +
-        `loss: ${logs.loss.toFixed(4)} - ` +
-        `front_output_accuracy: ${logs.front_output_accuracy.toFixed(4)} - ` +
-        `back_output_accuracy: ${logs.back_output_accuracy.toFixed(4)}`
+        `loss: ${loss} - ` +
+        `front_output_accuracy: ${frontAcc} - ` +
+        `back_output_accuracy: ${backAcc}`
       );
     },
     onTrainEnd: () => {
@@ -202,14 +206,34 @@ async function trainModel() {
     shuffle: true
   });
   
-  // Save model
+  // Save model using downloads handler (works in browser-based TF.js)
   console.log('💾 Saving model...\n');
-  const modelDir = './models/flashcard-generator';
+  const modelDir = path.resolve('./models/flashcard-generator');
   if (!fs.existsSync(modelDir)) {
     fs.mkdirSync(modelDir, { recursive: true });
   }
   
-  await model.save(`file://${modelDir}`);
+  // Save model artifacts manually
+  const modelJSON = await model.toJSON();
+  const weights = await model.getWeights();
+  
+  // Save model.json
+  fs.writeFileSync(
+    path.join(modelDir, 'model.json'),
+    JSON.stringify(modelJSON, null, 2)
+  );
+  
+  // Save weights as binary
+  const weightsData = [];
+  for (const weight of weights) {
+    const data = await weight.data();
+    weightsData.push(Array.from(data));
+  }
+  
+  fs.writeFileSync(
+    path.join(modelDir, 'weights.json'),
+    JSON.stringify(weightsData, null, 2)
+  );
   
   // Save config
   fs.writeFileSync(

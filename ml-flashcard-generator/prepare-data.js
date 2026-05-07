@@ -7,83 +7,10 @@ import fs from 'fs';
 import path from 'path';
 import nlp from 'compromise';
 import { removeStopwords } from 'stopword';
+import { largeTrainingDataset } from './training-data-large.js';
 
-// Sample educational content for training
-const trainingExamples = [
-  {
-    text: "Photosynthesis is the process by which plants convert sunlight into energy. Plants use chlorophyll to capture light energy.",
-    flashcards: [
-      { front: "What is photosynthesis?", back: "The process by which plants convert sunlight into energy" },
-      { front: "What do plants use to capture light energy?", back: "Chlorophyll" }
-    ]
-  },
-  {
-    text: "The mitochondria is the powerhouse of the cell. It produces ATP through cellular respiration.",
-    flashcards: [
-      { front: "What is the mitochondria?", back: "The powerhouse of the cell" },
-      { front: "What does mitochondria produce?", back: "ATP through cellular respiration" }
-    ]
-  },
-  {
-    text: "Python is a high-level programming language. It was created by Guido van Rossum in 1991.",
-    flashcards: [
-      { front: "What is Python?", back: "A high-level programming language" },
-      { front: "Who created Python?", back: "Guido van Rossum" },
-      { front: "When was Python created?", back: "1991" }
-    ]
-  },
-  {
-    text: "The water cycle consists of evaporation, condensation, and precipitation. Water evaporates from oceans and lakes.",
-    flashcards: [
-      { front: "What are the three stages of the water cycle?", back: "Evaporation, condensation, and precipitation" },
-      { front: "Where does water evaporate from?", back: "Oceans and lakes" }
-    ]
-  },
-  {
-    text: "DNA stands for Deoxyribonucleic Acid. It contains genetic information and is shaped like a double helix.",
-    flashcards: [
-      { front: "What does DNA stand for?", back: "Deoxyribonucleic Acid" },
-      { front: "What shape is DNA?", back: "Double helix" },
-      { front: "What does DNA contain?", back: "Genetic information" }
-    ]
-  },
-  {
-    text: "The French Revolution began in 1789. It led to the rise of Napoleon Bonaparte and changed European politics.",
-    flashcards: [
-      { front: "When did the French Revolution begin?", back: "1789" },
-      { front: "Who rose to power after the French Revolution?", back: "Napoleon Bonaparte" }
-    ]
-  },
-  {
-    text: "Gravity is a force that attracts objects toward each other. Isaac Newton discovered the law of universal gravitation.",
-    flashcards: [
-      { front: "What is gravity?", back: "A force that attracts objects toward each other" },
-      { front: "Who discovered the law of universal gravitation?", back: "Isaac Newton" }
-    ]
-  },
-  {
-    text: "The capital of France is Paris. Paris is known for the Eiffel Tower and the Louvre Museum.",
-    flashcards: [
-      { front: "What is the capital of France?", back: "Paris" },
-      { front: "What is Paris known for?", back: "The Eiffel Tower and the Louvre Museum" }
-    ]
-  },
-  {
-    text: "Photosynthesis occurs in chloroplasts. The equation is 6CO2 + 6H2O + light energy → C6H12O6 + 6O2.",
-    flashcards: [
-      { front: "Where does photosynthesis occur?", back: "In chloroplasts" },
-      { front: "What is the photosynthesis equation?", back: "6CO2 + 6H2O + light energy → C6H12O6 + 6O2" }
-    ]
-  },
-  {
-    text: "Shakespeare wrote Romeo and Juliet in 1597. It is a tragedy about two young lovers from feuding families.",
-    flashcards: [
-      { front: "Who wrote Romeo and Juliet?", back: "Shakespeare" },
-      { front: "When was Romeo and Juliet written?", back: "1597" },
-      { front: "What type of play is Romeo and Juliet?", back: "A tragedy about two young lovers from feuding families" }
-    ]
-  }
-];
+// Use the large dataset
+const trainingExamples = largeTrainingDataset;
 
 // Extract features from text
 function extractFeatures(text) {
@@ -92,7 +19,6 @@ function extractFeatures(text) {
   // Extract entities
   const people = doc.people().out('array');
   const places = doc.places().out('array');
-  const dates = doc.dates().out('array');
   const organizations = doc.organizations().out('array');
   
   // Extract sentences
@@ -101,6 +27,9 @@ function extractFeatures(text) {
   // Extract nouns and verbs
   const nouns = doc.nouns().out('array');
   const verbs = doc.verbs().out('array');
+  
+  // Extract dates manually (compromise dates() not available in all versions)
+  const dates = text.match(/\b\d{4}\b/g) || []; // Find years
   
   // Extract definitions (X is Y pattern)
   const definitions = [];

@@ -3,7 +3,7 @@
  * Tests the trained flashcard generation model
  */
 
-import * as tf from '@tensorflow/tfjs-node';
+import * as tf from '@tensorflow/tfjs';
 import fs from 'fs';
 import nlp from 'compromise';
 import { removeStopwords } from 'stopword';
