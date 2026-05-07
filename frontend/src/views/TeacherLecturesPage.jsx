@@ -68,7 +68,10 @@ export function TeacherLecturesPage() {
             maxContentLength: Infinity,
             maxBodyLength: Infinity,
           }).catch(err => {
-            throw new Error('S3 upload failed: ' + (err?.message || 'Network error'))
+            const status = err?.response?.status
+            const msg = err?.response?.data || err?.message || 'Unknown error'
+            if (!status) throw new Error('S3 upload failed: Network Error — check S3 bucket CORS settings allow PUT from your domain.')
+            throw new Error(`S3 upload failed (HTTP ${status}): ${msg}`)
           })
 
           cloudinaryUrl = sigData.fileUrl  // reuse field for the URL
