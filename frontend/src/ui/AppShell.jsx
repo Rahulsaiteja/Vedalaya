@@ -175,8 +175,8 @@ export function AppShell() {
           
           {/* Logo area */}
           <Link to={isAuthed ? "/app" : "/"} className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-emerald-800 rounded-full flex items-center justify-center text-white font-bold text-lg">
-              VD
+            <div className="w-10 h-10 bg-emerald-800 rounded-full flex items-center justify-center text-white font-bold text-xl italic">
+              V
             </div>
             <span className="font-bold text-emerald-900 tracking-tight hidden sm:block">Vedalaya</span>
           </Link>
