@@ -8,6 +8,7 @@ import ClassGroup from '../models/ClassGroup.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { sendTrainingCompleteEmail } from '../utils/email.js';
 import { env } from '../utils/env.js';
+import { markAbsentees } from '../utils/attendanceScheduler.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -289,6 +290,17 @@ router.post('/retrain', requireAuth, requireRole('admin'), async (req, res) => {
   } catch (err) {
     const msg = err?.response?.data?.error || err.message || 'Failed to trigger retrain.';
     res.status(500).json({ error: msg });
+  }
+});
+
+// ── Admin: manually trigger auto-absent job ───────────────────────────
+// Useful for testing or if the scheduler missed a day
+router.post('/mark-absentees', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    await markAbsentees();
+    res.json({ message: 'Auto-absent job completed. Check server logs for details.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

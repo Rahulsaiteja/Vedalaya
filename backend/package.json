@@ -39,6 +39,7 @@
     "multer": "^2.1.1",
     "multer-storage-cloudinary": "^4.0.0",
     "natural": "^6.10.0",
+    "node-cron": "^4.2.1",
     "nodemailer": "^8.0.2",
     "resend": "^4.8.0",
     "stopword": "^2.0.8",
