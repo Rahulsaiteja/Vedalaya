@@ -62,13 +62,20 @@ export function TeacherLecturesPage() {
           console.log('[Upload] Starting S3 PUT to:', sigData.presignedUrl?.substring(0, 80) + '...')
           // S3 direct upload via presigned PUT URL
           await axios.put(sigData.presignedUrl, file, {
-            headers: { 'Content-Type': file.type },
+            headers: {
+              'Content-Type': file.type,
+            },
             onUploadProgress: (e) => {
               if (e.total) setUploadProgress(Math.round((e.loaded / e.total) * 100))
             },
             timeout: 0,
             maxContentLength: Infinity,
             maxBodyLength: Infinity,
+            // Don't send Authorization header to S3 — presigned URL handles auth
+            transformRequest: [(data, headers) => {
+              delete headers.Authorization
+              return data
+            }],
           }).catch(err => {
             const status = err?.response?.status
             const msg = err?.response?.data || err?.message || 'Unknown error'

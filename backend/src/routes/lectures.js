@@ -27,6 +27,7 @@ const s3 = env.AWS_ACCESS_KEY_ID && env.AWS_S3_BUCKET
         accessKeyId: env.AWS_ACCESS_KEY_ID,
         secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
       },
+      forcePathStyle: true, // avoids virtual-hosted style URL issues
     })
   : null;
 
@@ -50,9 +51,10 @@ router.post('/sign-upload', requireAuth, requireRole('teacher'), async (req, res
         ContentType: fileType || 'video/mp4',
       });
 
-      const presignedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 }); // 1 hour
+      const presignedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
 
-      const fileUrl = `https://${S3_BUCKET}.s3.${env.AWS_REGION}.amazonaws.com/${key}`;
+      // Path-style URL: https://s3.eu-north-1.amazonaws.com/bucket/key
+      const fileUrl = `https://s3.${env.AWS_REGION}.amazonaws.com/${S3_BUCKET}/${key}`;
 
       return res.json({
         provider: 's3',
