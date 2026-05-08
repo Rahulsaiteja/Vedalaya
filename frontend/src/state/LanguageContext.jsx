@@ -392,7 +392,7 @@ export function LanguageProvider({ children }) {
   const t = (key) => dict?.[key] ?? translations.en?.[key] ?? key;
 
   return (
-    <LanguageContext.Provider value={{ lang, setLang, t, translations }}>
+    <LanguageContext.Provider value={{ language: lang, setLanguage: setLang, lang, setLang, t, translations }}>
       {children}
     </LanguageContext.Provider>
   );
