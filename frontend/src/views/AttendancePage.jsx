@@ -677,21 +677,20 @@ function RecordsTab({ isTeacher }) {
             <tr className="bg-slate-800 text-slate-400 text-xs uppercase tracking-widest">
               {isTeacher && <th className="text-left px-4 py-3">Student</th>}
               {isTeacher && <th className="text-left px-4 py-3">Class</th>}
-              <th className="text-left px-4 py-3">Date</th>
-              <th className="text-left px-4 py-3">Time</th>
+              <th className="text-left px-4 py-3">Date &amp; Time</th>
               <th className="text-left px-4 py-3">Status</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={isTeacher ? 5 : 3} className="px-4 py-8 text-center text-slate-500 animate-pulse">
+                <td colSpan={isTeacher ? 4 : 2} className="px-4 py-8 text-center text-slate-500 animate-pulse">
                   {t('loading_records')}
                 </td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={isTeacher ? 5 : 3} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={isTeacher ? 4 : 2} className="px-4 py-8 text-center text-slate-500">
                   {t('no_records')}
                 </td>
               </tr>
@@ -718,8 +717,10 @@ function RecordsTab({ isTeacher }) {
                       ) : '—'}
                     </td>
                   )}
-                  <td className="px-4 py-3 text-slate-300">{fmtDate(r.date)}</td>
-                  <td className="px-4 py-3 text-slate-400">{fmtTime(r.date)}</td>
+                  <td className="px-4 py-3 text-slate-300">
+                    <div className="font-medium">{fmtDate(r.date)}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">🕐 {fmtTime(r.date)}</div>
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
                       r.status === 'Present'
