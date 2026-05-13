@@ -531,6 +531,13 @@ function RecordsTab({ isTeacher }) {
   const [search,   setSearch]   = useState('')
   const [stats,    setStats]    = useState([])
 
+  // ── Mark Absent modal state ──────────────────────────────────────
+  const [showAbsentModal, setShowAbsentModal] = useState(false)
+  const [absentForm, setAbsentForm] = useState({ studentId: '', date: new Date().toISOString().slice(0, 10), classGroupId: '' })
+  const [absentLoading, setAbsentLoading] = useState(false)
+  const [absentMsg, setAbsentMsg] = useState(null)
+  const [absentErr, setAbsentErr] = useState(null)
+
   async function load() {
     setLoading(true)
     try {
@@ -564,6 +571,25 @@ function RecordsTab({ isTeacher }) {
 
   useEffect(() => { load() }, [])
 
+  // ── Submit manual absent ─────────────────────────────────────────
+  async function submitMarkAbsent() {
+    if (!absentForm.studentId) { setAbsentErr('Please select a student.'); return }
+    setAbsentLoading(true); setAbsentErr(null); setAbsentMsg(null)
+    try {
+      const res = await api.post('/attendance/mark-absent', {
+        studentId: absentForm.studentId,
+        date: absentForm.date,
+        classGroupId: absentForm.classGroupId || undefined,
+      })
+      setAbsentMsg(res.data.message)
+      load() // refresh records
+    } catch (err) {
+      setAbsentErr(err?.response?.data?.error || err.message)
+    } finally {
+      setAbsentLoading(false)
+    }
+  }
+
   const filtered = records.filter(r => {
     const name = (r.user?.name || '').toLowerCase()
     return name.includes(search.toLowerCase())
@@ -572,8 +598,7 @@ function RecordsTab({ isTeacher }) {
   return (
     <div className="space-y-6">
       {/* Teacher stats grid */}
-      {isTeacher && stats.length > 0 && (
-        <div>
+      {isTeacher && stats.length > 0 && (        <div>
           <h3 className="text-xs font-bold tracking-widest uppercase text-slate-400 mb-3">
             {t('student_summary')}
           </h3>
@@ -605,6 +630,98 @@ function RecordsTab({ isTeacher }) {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Filters (teacher only) */}
+      {isTeacher && (
+        <>
+          {/* Mark Absent button */}
+          <div className="flex justify-end">
+            <button
+              onClick={() => { setShowAbsentModal(true); setAbsentMsg(null); setAbsentErr(null) }}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-600 active:scale-95 text-white text-sm font-bold tracking-wide shadow-lg transition-all"
+            >
+              🚫 Mark Student Absent
+            </button>
+          </div>
+
+          {/* Mark Absent Modal */}
+          {showAbsentModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+              <div className="bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-bold text-white">Mark Student Absent</h3>
+                  <button onClick={() => setShowAbsentModal(false)} className="text-slate-400 hover:text-white text-xl leading-none">✕</button>
+                </div>
+
+                {/* Student selector */}
+                <div>
+                  <label className="block text-xs font-bold tracking-widest uppercase text-slate-400 mb-1.5">Student *</label>
+                  <select
+                    value={absentForm.studentId}
+                    onChange={e => setAbsentForm(f => ({ ...f, studentId: e.target.value }))}
+                    className="w-full rounded-xl bg-slate-700 border border-slate-600 text-slate-100 px-4 py-2.5 outline-none focus:border-rose-500 transition-colors text-sm"
+                  >
+                    <option value="">Select a student…</option>
+                    {students.map(s => (
+                      <option key={s._id} value={s._id}>{s.name} ({s.email})</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Date picker */}
+                <div>
+                  <label className="block text-xs font-bold tracking-widest uppercase text-slate-400 mb-1.5">Date *</label>
+                  <input
+                    type="date"
+                    value={absentForm.date}
+                    max={new Date().toISOString().slice(0, 10)}
+                    onChange={e => setAbsentForm(f => ({ ...f, date: e.target.value }))}
+                    className="w-full rounded-xl bg-slate-700 border border-slate-600 text-slate-100 px-4 py-2.5 outline-none focus:border-rose-500 transition-colors text-sm"
+                  />
+                </div>
+
+                {/* Class selector (optional) */}
+                <div>
+                  <label className="block text-xs font-bold tracking-widest uppercase text-slate-400 mb-1.5">Class Section <span className="normal-case font-normal">(optional)</span></label>
+                  <select
+                    value={absentForm.classGroupId}
+                    onChange={e => setAbsentForm(f => ({ ...f, classGroupId: e.target.value }))}
+                    className="w-full rounded-xl bg-slate-700 border border-slate-600 text-slate-100 px-4 py-2.5 outline-none focus:border-rose-500 transition-colors text-sm"
+                  >
+                    <option value="">No specific class</option>
+                    {classes.map(c => (
+                      <option key={c._id} value={c._id}>{c.name}{c.section ? ` · ${c.section}` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {absentErr && (
+                  <div className="p-3 rounded-xl bg-rose-900/30 border border-rose-500/40 text-rose-300 text-sm">{absentErr}</div>
+                )}
+                {absentMsg && (
+                  <div className="p-3 rounded-xl bg-emerald-900/30 border border-emerald-500/40 text-emerald-300 text-sm">✅ {absentMsg}</div>
+                )}
+
+                <div className="flex gap-3 pt-1">
+                  <button
+                    onClick={submitMarkAbsent}
+                    disabled={absentLoading}
+                    className="flex-1 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-600 disabled:opacity-50 text-white font-bold text-sm tracking-wide transition-all"
+                  >
+                    {absentLoading ? 'Saving…' : 'Confirm Absent'}
+                  </button>
+                  <button
+                    onClick={() => setShowAbsentModal(false)}
+                    className="flex-1 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold text-sm tracking-wide transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Filters (teacher only) */}
@@ -679,18 +796,19 @@ function RecordsTab({ isTeacher }) {
               {isTeacher && <th className="text-left px-4 py-3">Class</th>}
               <th className="text-left px-4 py-3">Date &amp; Time</th>
               <th className="text-left px-4 py-3">Status</th>
+              {isTeacher && <th className="text-left px-4 py-3">Action</th>}
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={isTeacher ? 4 : 2} className="px-4 py-8 text-center text-slate-500 animate-pulse">
+                <td colSpan={isTeacher ? 5 : 2} className="px-4 py-8 text-center text-slate-500 animate-pulse">
                   {t('loading_records')}
                 </td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={isTeacher ? 4 : 2} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={isTeacher ? 5 : 2} className="px-4 py-8 text-center text-slate-500">
                   {t('no_records')}
                 </td>
               </tr>
@@ -730,6 +848,32 @@ function RecordsTab({ isTeacher }) {
                       {r.status}
                     </span>
                   </td>
+                  {isTeacher && (
+                    <td className="px-4 py-3">
+                      {r.status === 'Present' ? (
+                        <button
+                          onClick={async () => {
+                            if (!window.confirm(`Mark ${r.user?.name} as Absent on ${fmtDate(r.date)}?`)) return
+                            try {
+                              await api.post('/attendance/mark-absent', {
+                                studentId: r.user?._id,
+                                date: new Date(r.date).toISOString().slice(0, 10),
+                                classGroupId: r.classGroup?._id,
+                              })
+                              load()
+                            } catch (err) {
+                              alert(err?.response?.data?.error || 'Failed to mark absent')
+                            }
+                          }}
+                          className="px-3 py-1 rounded-lg bg-rose-900/40 hover:bg-rose-700/60 text-rose-400 hover:text-rose-200 text-xs font-bold border border-rose-700/40 transition-all"
+                        >
+                          Mark Absent
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-600">—</span>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))
             )}

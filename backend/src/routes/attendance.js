@@ -293,6 +293,49 @@ router.post('/retrain', requireAuth, requireRole('admin'), async (req, res) => {
   }
 });
 
+// ── Teacher: manually mark a student as absent ────────────────────────
+router.post('/mark-absent', requireAuth, requireRole('teacher'), async (req, res) => {
+  try {
+    const { studentId, date, classGroupId } = req.body;
+    if (!studentId) return res.status(400).json({ error: 'studentId is required.' });
+
+    const student = await User.findOne({ _id: studentId, role: 'student' });
+    if (!student) return res.status(404).json({ error: 'Student not found.' });
+
+    // Use provided date or today
+    const targetDate = date ? new Date(date) : new Date();
+    targetDate.setHours(0, 0, 0, 0);
+
+    // Check if a record already exists for this student on this date
+    const query = { user: studentId, date: { $gte: targetDate, $lt: new Date(targetDate.getTime() + 24 * 60 * 60 * 1000) } };
+    if (classGroupId) query.classGroup = classGroupId;
+
+    const existing = await Attendance.findOne(query);
+    if (existing) {
+      if (existing.status === 'Absent') {
+        return res.status(200).json({ message: 'Already marked absent.', alreadyMarked: true });
+      }
+      // Update Present → Absent
+      existing.status = 'Absent';
+      await existing.save();
+      return res.status(200).json({ message: `${student.name} updated to Absent.`, record: existing });
+    }
+
+    // Create new Absent record
+    const record = await Attendance.create({
+      user: studentId,
+      classGroup: classGroupId || null,
+      date: targetDate,
+      status: 'Absent',
+    });
+
+    return res.status(201).json({ message: `${student.name} marked as Absent.`, record });
+  } catch (error) {
+    console.error('Error in /mark-absent:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // ── Admin: manually trigger auto-absent job ───────────────────────────
 // Useful for testing or if the scheduler missed a day
 router.post('/mark-absentees', requireAuth, requireRole('admin'), async (req, res) => {
