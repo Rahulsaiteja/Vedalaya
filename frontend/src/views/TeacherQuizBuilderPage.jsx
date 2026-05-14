@@ -17,7 +17,6 @@ export function TeacherQuizBuilderPage({ mode }) {
   const [timeLimitSeconds, setTimeLimitSeconds] = useState(300)
   const [questions, setQuestions] = useState([EmptyQuestion()])
 
-  const [genText, setGenText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
@@ -68,24 +67,6 @@ export function TeacherQuizBuilderPage({ mode }) {
     setQuestions((qs) => [...qs, EmptyQuestion()])
   }
 
-  async function generateFromText() {
-    setBusy(true)
-    setError(null)
-    try {
-      const res = await api.post('/generate/quiz', { text: genText, numQuestions: 8 })
-      const generated = (res.data.questions || []).map((q) => ({
-        prompt: q.prompt,
-        options: q.options,
-        correctOptionIndex: q.correctOptionIndex,
-      }))
-      setQuestions((qs) => (qs.length === 1 && !qs[0].prompt.trim() ? generated : [...qs, ...generated]))
-    } catch (err) {
-      setError(err?.response?.data?.error?.message || 'Generation failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   async function save() {
     setBusy(true)
     setError(null)
@@ -118,7 +99,7 @@ export function TeacherQuizBuilderPage({ mode }) {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold text-emerald-900 tracking-tight">{isEdit ? 'Edit Quiz' : 'Create Quiz'}</h2>
-          <p className="mt-2 text-slate-500 font-medium">Add MCQs manually or generate drafts from text.</p>
+          <p className="mt-2 text-slate-500 font-medium">Add questions manually and set the correct answer for each.</p>
         </div>
         <div className="flex gap-4">
           <Link to="/teacher" className="rounded-full border-2 border-slate-200 bg-white px-6 py-3 text-xs font-bold tracking-widest text-slate-600 hover:bg-slate-50 hover:text-emerald-800 hover:border-emerald-200 transition-colors">
@@ -157,34 +138,6 @@ export function TeacherQuizBuilderPage({ mode }) {
               placeholder="Optional description"
             />
           </label>
-        </div>
-      </Card>
-
-      <Card>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-xl font-bold text-emerald-900">Generate questions with AI</h3>
-        </div>
-        <p className="text-sm font-medium text-slate-500 mb-6">Paste course notes and we'll generate draft MCQs you can edit.</p>
-        
-        <label className="block">
-          <div className="mb-1.5 text-xs font-bold tracking-widest text-slate-500 uppercase">Input Text</div>
-          <textarea
-            value={genText}
-            onChange={(e) => setGenText(e.target.value)}
-            rows={5}
-            className="w-full rounded-xl border-2 border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none placeholder:text-slate-400 focus:border-emerald-600 focus:ring-4 focus:ring-emerald-600/10 transition-all font-medium resize-y"
-            placeholder="Paste at least 2–3 sentences…"
-          />
-        </label>
-        <div className="mt-4 flex justify-end">
-          <button
-            onClick={generateFromText}
-            disabled={busy || genText.trim().length < 20}
-            className="inline-flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-2.5 text-sm font-bold tracking-widest text-emerald-700 hover:bg-emerald-100 transition-colors uppercase disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v4"></path><path d="M12 18v4"></path><path d="M4.93 4.93l2.83 2.83"></path><path d="M16.24 16.24l2.83 2.83"></path><path d="M2 12h4"></path><path d="M18 12h4"></path><path d="M4.93 19.07l2.83-2.83"></path><path d="M16.24 7.76l2.83-2.83"></path></svg>
-            {busy ? 'GENERATING…' : 'AUTO-GENERATE'}
-          </button>
         </div>
       </Card>
 
