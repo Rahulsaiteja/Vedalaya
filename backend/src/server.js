@@ -10,7 +10,6 @@ import { connectDb } from './utils/connectDb.js';
 import { env } from './utils/env.js';
 import { notFoundHandler, errorHandler } from './middleware/errors.js';
 import { loadFlashcardModel } from './utils/mlFlashcardGenerator.js';
-import { startAttendanceScheduler } from './utils/attendanceScheduler.js';
 
 import authRoutes from './routes/auth.js';
 import quizRoutes from './routes/quizzes.js';
@@ -75,9 +74,6 @@ await connectDb(env.MONGODB_URI);
 loadFlashcardModel().catch(err => {
   console.log('⚠️  ML model not available, using rule-based fallback');
 });
-
-// Start attendance auto-absent scheduler (2 PM IST, Mon–Sat)
-startAttendanceScheduler();
 
 app.listen(env.PORT, () => {
   // eslint-disable-next-line no-console

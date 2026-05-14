@@ -8,7 +8,6 @@ import ClassGroup from '../models/ClassGroup.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { sendTrainingCompleteEmail } from '../utils/email.js';
 import { env } from '../utils/env.js';
-import { markAbsentees } from '../utils/attendanceScheduler.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -333,17 +332,6 @@ router.post('/mark-absent', requireAuth, requireRole('teacher'), async (req, res
   } catch (error) {
     console.error('Error in /mark-absent:', error);
     res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
-// ── Admin: manually trigger auto-absent job ───────────────────────────
-// Useful for testing or if the scheduler missed a day
-router.post('/mark-absentees', requireAuth, requireRole('admin'), async (req, res) => {
-  try {
-    await markAbsentees();
-    res.json({ message: 'Auto-absent job completed. Check server logs for details.' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
 });
 
