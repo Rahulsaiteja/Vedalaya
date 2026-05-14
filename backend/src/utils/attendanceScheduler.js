@@ -4,35 +4,32 @@
  * Runs every day at 2:00 PM IST (08:30 UTC) Monday–Saturday.
  * Marks all students who have NOT marked attendance that day as Absent.
  *
- * Also runs a catch-up check on server startup — if the server restarted
- * after 08:30 UTC on a weekday and the job was missed, it runs immediately.
+ * IST = UTC+5:30
+ * 2:00 PM IST = 08:30 UTC  →  cron: "30 8 * * 1-6"
  */
 
 import cron from 'node-cron';
 import Attendance from '../models/Attendance.js';
 import { User } from '../models/User.js';
 
-// IST = UTC+5:30  →  2:00 PM IST = 08:30 UTC
 const CRON_SCHEDULE = '30 8 * * 1-6';
 
 /**
- * Returns the IST date boundaries for a given UTC Date.
- * todayStart = midnight IST in UTC
- * todayEnd   = end of day IST in UTC (exclusive, i.e. next midnight)
+ * Returns the full IST day boundaries for a given UTC Date.
+ *   todayStartUTC = midnight IST expressed in UTC
+ *   todayEndUTC   = next midnight IST expressed in UTC  (exclusive)
  */
 function getISTDayBounds(utcNow) {
-  const IST_OFFSET_MS = 330 * 60 * 1000; // +5:30
+  const IST_OFFSET_MS = 330 * 60 * 1000; // +5:30 in ms
 
-  // Current time expressed as IST
+  // Shift to IST, zero out time components to get IST midnight
   const nowIST = new Date(utcNow.getTime() + IST_OFFSET_MS);
-
-  // Midnight of today in IST (zero out h/m/s/ms)
   const midnightIST = new Date(nowIST);
   midnightIST.setHours(0, 0, 0, 0);
 
-  // Convert back to UTC
+  // Convert IST midnight back to UTC
   const todayStartUTC = new Date(midnightIST.getTime() - IST_OFFSET_MS);
-  const todayEndUTC   = new Date(todayStartUTC.getTime() + 24 * 60 * 60 * 1000); // +24 h
+  const todayEndUTC   = new Date(todayStartUTC.getTime() + 24 * 60 * 60 * 1000);
 
   return { todayStartUTC, todayEndUTC };
 }
@@ -43,7 +40,7 @@ export async function markAbsentees() {
 
     const { todayStartUTC, todayEndUTC } = getISTDayBounds(new Date());
 
-    // Timestamp to store on the absent record (2:00 PM IST)
+    // Store absent records at exactly 2:00 PM IST
     const absentTimestamp = new Date(todayStartUTC.getTime() + 14 * 60 * 60 * 1000);
 
     // All students
@@ -53,7 +50,7 @@ export async function markAbsentees() {
       return;
     }
 
-    // All attendance records for today (full day window — fixes the cut-off bug)
+    // All attendance records for the full IST day (fixes the old 14-hour cut-off bug)
     const todayRecords = await Attendance.find(
       { date: { $gte: todayStartUTC, $lt: todayEndUTC } },
       'user'
@@ -61,7 +58,6 @@ export async function markAbsentees() {
 
     const studentsWithRecord = new Set(todayRecords.map(r => r.user.toString()));
 
-    // Students with no record at all today
     const absentStudents = students.filter(
       s => !studentsWithRecord.has(s._id.toString())
     );
@@ -71,7 +67,6 @@ export async function markAbsentees() {
       return;
     }
 
-    // Bulk insert — use ordered:false so one duplicate doesn't block the rest
     const absentRecords = absentStudents.map(s => ({
       user:       s._id,
       classGroup: null,
@@ -79,14 +74,13 @@ export async function markAbsentees() {
       status:     'Absent',
     }));
 
+    // ordered:false — one duplicate won't block the rest
     const result = await Attendance.insertMany(absentRecords, { ordered: false });
 
     console.log(`[Attendance Scheduler] Marked ${result.length} student(s) as Absent:`);
     absentStudents.forEach(s => console.log(`  - ${s.name}`));
 
   } catch (err) {
-    // insertMany with ordered:false throws a BulkWriteError but still inserts
-    // the non-duplicate documents — log the details but don't crash
     if (err.name === 'MongoBulkWriteError') {
       const inserted = err.result?.nInserted ?? 0;
       const failed   = err.writeErrors?.length ?? 0;
@@ -99,35 +93,14 @@ export async function markAbsentees() {
   }
 }
 
-/**
- * On server startup, check if today is a weekday and it's already past
- * 2:00 PM IST (08:30 UTC). If so, run the job immediately in case the
- * server restarted after the scheduled time and missed it.
- */
-function runCatchUpIfNeeded() {
-  const now     = new Date();
-  const dayUTC  = now.getUTCDay();   // 0 = Sun, 6 = Sat
-  const hourUTC = now.getUTCHours();
-  const minUTC  = now.getUTCMinutes();
-
-  const isWeekday      = dayUTC >= 1 && dayUTC <= 6;
-  const isPast2PMIST   = hourUTC > 8 || (hourUTC === 8 && minUTC >= 30);
-
-  if (!isWeekday || !isPast2PMIST) return;
-
-  console.log('[Attendance Scheduler] Server started after 2 PM IST — running catch-up job...');
-  markAbsentees();
-}
-
 export function startAttendanceScheduler() {
   if (!cron.validate(CRON_SCHEDULE)) {
     console.error('[Attendance Scheduler] Invalid cron schedule:', CRON_SCHEDULE);
     return;
   }
 
+  // Runs at exactly 08:30 UTC (= 2:00 PM IST) Mon–Sat only
   cron.schedule(CRON_SCHEDULE, markAbsentees, { timezone: 'UTC' });
-  console.log('[Attendance Scheduler] Started — runs at 2:00 PM IST (Mon–Sat)');
 
-  // Catch-up: fire immediately if server restarted after scheduled time today
-  runCatchUpIfNeeded();
+  console.log('[Attendance Scheduler] Started — runs at 2:00 PM IST (Mon–Sat)');
 }
