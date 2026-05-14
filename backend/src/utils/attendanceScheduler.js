@@ -1,91 +1,133 @@
 /**
  * Attendance Scheduler
- * 
+ *
  * Runs every day at 2:00 PM IST (08:30 UTC) Monday–Saturday.
  * Marks all students who have NOT marked attendance that day as Absent.
- * 
- * Window: 7:00 AM – 2:00 PM IST
- * Days:   Monday (1) – Saturday (6)  [Sunday = 0 is skipped]
+ *
+ * Also runs a catch-up check on server startup — if the server restarted
+ * after 08:30 UTC on a weekday and the job was missed, it runs immediately.
  */
 
 import cron from 'node-cron';
 import Attendance from '../models/Attendance.js';
 import { User } from '../models/User.js';
 
-// IST = UTC+5:30
-// 2:00 PM IST = 08:30 UTC  → cron: "30 8 * * 1-6"
+// IST = UTC+5:30  →  2:00 PM IST = 08:30 UTC
 const CRON_SCHEDULE = '30 8 * * 1-6';
 
-async function markAbsentees() {
+/**
+ * Returns the IST date boundaries for a given UTC Date.
+ * todayStart = midnight IST in UTC
+ * todayEnd   = end of day IST in UTC (exclusive, i.e. next midnight)
+ */
+function getISTDayBounds(utcNow) {
+  const IST_OFFSET_MS = 330 * 60 * 1000; // +5:30
+
+  // Current time expressed as IST
+  const nowIST = new Date(utcNow.getTime() + IST_OFFSET_MS);
+
+  // Midnight of today in IST (zero out h/m/s/ms)
+  const midnightIST = new Date(nowIST);
+  midnightIST.setHours(0, 0, 0, 0);
+
+  // Convert back to UTC
+  const todayStartUTC = new Date(midnightIST.getTime() - IST_OFFSET_MS);
+  const todayEndUTC   = new Date(todayStartUTC.getTime() + 24 * 60 * 60 * 1000); // +24 h
+
+  return { todayStartUTC, todayEndUTC };
+}
+
+export async function markAbsentees() {
   try {
     console.log('[Attendance Scheduler] Running auto-absent job...');
 
-    // Get today's date boundaries in IST
-    // IST offset = +330 minutes
-    const nowUTC = new Date();
-    const nowIST = new Date(nowUTC.getTime() + 330 * 60 * 1000);
+    const { todayStartUTC, todayEndUTC } = getISTDayBounds(new Date());
 
-    // Start of today in IST (midnight IST = 18:30 UTC previous day)
-    const todayISTMidnight = new Date(nowIST);
-    todayISTMidnight.setHours(0, 0, 0, 0);
-    const todayStartUTC = new Date(todayISTMidnight.getTime() - 330 * 60 * 1000);
+    // Timestamp to store on the absent record (2:00 PM IST)
+    const absentTimestamp = new Date(todayStartUTC.getTime() + 14 * 60 * 60 * 1000);
 
-    // End of today in IST (2:00 PM IST = 08:30 UTC)
-    const todayEndUTC = new Date(todayStartUTC.getTime() + (14 * 60) * 60 * 1000); // +14 hours
-
-    // Get all students
+    // All students
     const students = await User.find({ role: 'student' }, '_id name').lean();
     if (students.length === 0) {
       console.log('[Attendance Scheduler] No students found.');
       return;
     }
 
-    // Get all attendance records for today (Present or Absent already marked)
-    const todayRecords = await Attendance.find({
-      date: { $gte: todayStartUTC, $lt: todayEndUTC },
-    }, 'user').lean();
+    // All attendance records for today (full day window — fixes the cut-off bug)
+    const todayRecords = await Attendance.find(
+      { date: { $gte: todayStartUTC, $lt: todayEndUTC } },
+      'user'
+    ).lean();
 
     const studentsWithRecord = new Set(todayRecords.map(r => r.user.toString()));
 
-    // Find students with no record today
-    const absentStudents = students.filter(s => !studentsWithRecord.has(s._id.toString()));
+    // Students with no record at all today
+    const absentStudents = students.filter(
+      s => !studentsWithRecord.has(s._id.toString())
+    );
 
     if (absentStudents.length === 0) {
       console.log('[Attendance Scheduler] All students already have attendance today.');
       return;
     }
 
-    // Bulk insert Absent records
+    // Bulk insert — use ordered:false so one duplicate doesn't block the rest
     const absentRecords = absentStudents.map(s => ({
-      user: s._id,
+      user:       s._id,
       classGroup: null,
-      date: todayEndUTC, // mark at 2 PM IST
-      status: 'Absent',
+      date:       absentTimestamp,
+      status:     'Absent',
     }));
 
-    await Attendance.insertMany(absentRecords, { ordered: false });
+    const result = await Attendance.insertMany(absentRecords, { ordered: false });
 
-    console.log(`[Attendance Scheduler] Marked ${absentStudents.length} student(s) as Absent:`);
+    console.log(`[Attendance Scheduler] Marked ${result.length} student(s) as Absent:`);
     absentStudents.forEach(s => console.log(`  - ${s.name}`));
 
   } catch (err) {
-    console.error('[Attendance Scheduler] Error:', err.message);
+    // insertMany with ordered:false throws a BulkWriteError but still inserts
+    // the non-duplicate documents — log the details but don't crash
+    if (err.name === 'MongoBulkWriteError') {
+      const inserted = err.result?.nInserted ?? 0;
+      const failed   = err.writeErrors?.length ?? 0;
+      console.warn(
+        `[Attendance Scheduler] BulkWrite: ${inserted} inserted, ${failed} skipped (likely duplicates).`
+      );
+    } else {
+      console.error('[Attendance Scheduler] Error:', err.message, err.stack);
+    }
   }
 }
 
+/**
+ * On server startup, check if today is a weekday and it's already past
+ * 2:00 PM IST (08:30 UTC). If so, run the job immediately in case the
+ * server restarted after the scheduled time and missed it.
+ */
+function runCatchUpIfNeeded() {
+  const now     = new Date();
+  const dayUTC  = now.getUTCDay();   // 0 = Sun, 6 = Sat
+  const hourUTC = now.getUTCHours();
+  const minUTC  = now.getUTCMinutes();
+
+  const isWeekday      = dayUTC >= 1 && dayUTC <= 6;
+  const isPast2PMIST   = hourUTC > 8 || (hourUTC === 8 && minUTC >= 30);
+
+  if (!isWeekday || !isPast2PMIST) return;
+
+  console.log('[Attendance Scheduler] Server started after 2 PM IST — running catch-up job...');
+  markAbsentees();
+}
+
 export function startAttendanceScheduler() {
-  // Validate cron expression
   if (!cron.validate(CRON_SCHEDULE)) {
     console.error('[Attendance Scheduler] Invalid cron schedule:', CRON_SCHEDULE);
     return;
   }
 
-  cron.schedule(CRON_SCHEDULE, markAbsentees, {
-    timezone: 'UTC', // we handle IST conversion manually
-  });
+  cron.schedule(CRON_SCHEDULE, markAbsentees, { timezone: 'UTC' });
+  console.log('[Attendance Scheduler] Started — runs at 2:00 PM IST (Mon–Sat)');
 
-  console.log(`[Attendance Scheduler] Started — runs at 2:00 PM IST (Mon–Sat)`);
+  // Catch-up: fire immediately if server restarted after scheduled time today
+  runCatchUpIfNeeded();
 }
-
-// Export for manual trigger via API
-export { markAbsentees };
