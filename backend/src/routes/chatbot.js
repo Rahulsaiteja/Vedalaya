@@ -193,23 +193,35 @@ Question: ${message}`;
 
   } catch (error) {
     const status = Number(error?.status || error?.response?.status || 500);
+    const errorText = `${error?.message || ""} ${JSON.stringify(error?.errorDetails || "")}`;
+
     const isQuotaError =
       status === 429 ||
-      /quota|rate limit|too many requests/i.test(
-        `${error?.message || ""} ${JSON.stringify(error?.errorDetails || "")}`,
-      );
+      /quota|rate limit|too many requests/i.test(errorText);
 
-    if (isQuotaError) {
-      console.log("Gemini quota exceeded, using fallback");
+    const isAuthError =
+      status === 400 ||
+      status === 401 ||
+      status === 403 ||
+      /api.?key|invalid|unauthorized|permission|not valid/i.test(errorText);
+
+    if (isQuotaError || isAuthError) {
+      if (isAuthError) {
+        console.warn("Gemini API key issue — using fallback. Error:", error.message);
+      } else {
+        console.log("Gemini quota exceeded — using fallback");
+      }
       return res.status(200).json({
         reply: getLocalFallbackReply(req.body?.message),
         source: 'fallback'
       });
     }
 
-    console.error("Chatbot Error:", error.message);
-    res.status(500).json({
-      reply: "Sorry, I am facing technical issues right now. Please try again in a moment.",
+    console.error("Chatbot Error:", error.message, error?.status, error?.errorDetails);
+    // Always fall back instead of showing a technical error to the user
+    return res.status(200).json({
+      reply: getLocalFallbackReply(req.body?.message),
+      source: 'fallback'
     });
   }
 });
